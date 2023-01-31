@@ -4,6 +4,8 @@
 *.dll
 *.so
 *.dylib
+main.zip
+main
 
 # Test binary, built with `go test -c`
 *.test
@@ -11,5 +13,13 @@
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
+docs/godoc
+docs/apispec
+docs/docs.zip
+docs/github.com/
+docs/index.html
+docs/lib/
+docs/src/
+config.json
 # Dependency directories (remove the comment below to include it)
 # vendor/
