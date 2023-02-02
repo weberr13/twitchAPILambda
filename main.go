@@ -41,8 +41,10 @@ type Configuration struct {
 
 // CreateClipResponse is the response from twitch on creating a clip
 type CreateClipResponse struct {
-	EditURL string `json:"edit_url"`
-	ID      string `json:"id"`
+	Data []struct {
+		EditURL string `json:"edit_url"`
+		ID      string `json:"id"`
+	} `json:"data"`
 }
 
 // TwitchAPIError is the standard error struct from twitch
@@ -252,13 +254,19 @@ func runCommand(w http.ResponseWriter, r *http.Request, cmd, name, id, token str
 			w.WriteHeader(resp.StatusCode)
 			return nil
 		}
-		if m.EditURL != "" {
-			r := fmt.Sprintf("successfully created clip with id:%s and url:%s. Use the URL to adjust timing and duration.", m.ID, m.EditURL)
+		r := ""
+		for _, d := range m.Data {
+			if d.EditURL != "" {
+				r += fmt.Sprintf("successfully created clip with id:%s and url:%s. Use the URL to adjust timing and duration.", d.ID, d.EditURL)
+			}
+		}
+		if r != "" {
 			_, _ = w.Write([]byte(r))
 			w.WriteHeader(http.StatusAccepted)
 			return nil
 		}
-		r := fmt.Sprintf("unexpected response from TwitchAPI: %s", string(b))
+
+		r = fmt.Sprintf("unexpected response from TwitchAPI: %s", string(b))
 		_, _ = w.Write([]byte(r))
 		w.WriteHeader(http.StatusInternalServerError)
 	default:
