@@ -141,13 +141,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) error {
 			w.WriteHeader(http.StatusUnauthorized)
 			return fmt.Errorf("not authorized to use this plugin, contact weberr13 directly")
 		}
-		levelN, ok := config.LevelAsNumber[strings.ToLower(userLevel)]
-		if !ok {
-			_, _ = w.Write([]byte("unexpected user level, contact weberr13"))
-			w.WriteHeader(http.StatusUnauthorized)
-			return fmt.Errorf("unexpected user level, contact weberr13")
-		}
-		if levelN > config.LevelAsNumber[ourConfig.AuthorizedChannels[id]] {
+		if config.ToNum(userLevel) > config.LevelAsNumber[level] {
 			_, _ = w.Write([]byte(fmt.Sprintf("Not authorized to use this plugin at %s, must be greater than or equal to %s, contact weberr13 directly", level, ourConfig.AuthorizedChannels[id])))
 			w.WriteHeader(http.StatusUnauthorized)
 			return fmt.Errorf("not authorized to use this plugin at %s, must be greater than or equal to %s, contact weberr13 directly", level, ourConfig.AuthorizedChannels[id])

@@ -4,6 +4,7 @@ import (
 	_ "embed" // embed the config in the binary for now
 	"encoding/json"
 	"log"
+	"strings"
 )
 
 //go:embed config.json
@@ -30,6 +31,14 @@ type Configuration struct {
 	AuthorizedChannels map[string]string `json:"authorizedChannels"`
 }
 
+func ToNum(level string) int {
+	n, ok := LevelAsNumber[strings.ToLower(level)]
+	if !ok {
+		return 6
+	}
+	return n
+}
+
 // NewConfig from the embedded json
 func NewConfig() *Configuration {
 	ourConfig := &Configuration{}
@@ -44,5 +53,11 @@ func NewConfig() *Configuration {
 		ourConfig.SignSecret = "simpleSecret"
 	}
 	log.Printf("config is %#v from %s", ourConfig, string(configBytes))
+	for id, level := range ourConfig.AuthorizedChannels {
+		if ToNum(level) > 4 {
+			ourConfig.AuthorizedChannels[id] = "owner"
+			log.Printf("overriding user level to owner for %s, must be at least a regular to use the commands", id)
+		}
+	}
 	return ourConfig
 }
