@@ -29,14 +29,24 @@ import (
 //go:embed config.json
 var configBytes []byte
 
+var levelAsNumber = map[string]int{
+	"owner":      0,
+	"moderator":  1,
+	"vip":        2,
+	"regular":    3,
+	"subscriber": 4,
+	"everyone":   5,
+}
+
 // Configuration embedded at build time
 type Configuration struct {
-	ClientSecret string `json:"clientSecret"`
-	ClientID     string `json:"clientID"`
-	OurURL       string `json:"ourURL"`
-	TableName    string `json:"tableName"`
-	RedirectURL  string `json:"redirect"`
-	SignSecret   string `json:"signSecret"`
+	ClientSecret       string            `json:"clientSecret"`
+	ClientID           string            `json:"clientID"`
+	OurURL             string            `json:"ourURL"`
+	TableName          string            `json:"tableName"`
+	RedirectURL        string            `json:"redirect"`
+	SignSecret         string            `json:"signSecret"`
+	AuthorizedChannels map[string]string `json:"authorizedChannels"`
 }
 
 // CreateClipResponse is the response from twitch on creating a clip
@@ -285,14 +295,42 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) error {
 		vals := strings.Split(channel, "&")
 		id := ""
 		name := ""
+		userLevel := ""
 		// displayName=weberr13&provider=twitch
 		for _, v := range vals {
 			switch {
 			case strings.HasPrefix(v, "providerId="):
 				id = strings.TrimPrefix(v, "providerId=")
+			}
+		}
+		channel := r.Header.Get("Nightbot-User")
+		//"name=weberr13&displayName=weberr13&provider=twitch&providerId=403503512&userLevel=moderator"
+		vals = strings.Split(channel, "&")
+		for _, v := range vals {
+			switch {
+			case strings.HasPrefix(v, "userLevel="):
+				userLevel = strings.TrimPrefix(v, "userLevel=")
 			case strings.HasPrefix(v, "name="):
 				name = strings.TrimPrefix(v, "name=")
 			}
+		}
+		level, ok := ourConfig.AuthorizedChannels[id]
+		if !ok {
+			log.Printf("id %s not found in %#v ", id, ourConfig.AuthorizedChannels)
+			_, _ = w.Write([]byte(fmt.Sprintf("channel %s not authorized to use this plugin, contact weberr13 directly", id)))
+			w.WriteHeader(http.StatusUnauthorized)
+			return fmt.Errorf("not authorized to use this plugin, contact weberr13 directly")
+		}
+		levelN, ok := levelAsNumber[strings.ToLower(userLevel)]
+		if !ok {
+			_, _ = w.Write([]byte("unexpected user level, contact weberr13"))
+			w.WriteHeader(http.StatusUnauthorized)
+			return fmt.Errorf("unexpected user level, contact weberr13")
+		}
+		if levelN > levelAsNumber[ourConfig.AuthorizedChannels[id]] {
+			_, _ = w.Write([]byte(fmt.Sprintf("Not authorized to use this plugin at %s, must be greater than or equal to %s, contact weberr13 directly", level, ourConfig.AuthorizedChannels[id])))
+			w.WriteHeader(http.StatusUnauthorized)
+			return fmt.Errorf("not authorized to use this plugin at %s, must be greater than or equal to %s, contact weberr13 directly", level, ourConfig.AuthorizedChannels[id])
 		}
 		cmd = r.URL.Query().Get("cmd")
 		idN, err := strconv.ParseInt(id, 10, 64)
