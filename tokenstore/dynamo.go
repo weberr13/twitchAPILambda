@@ -38,6 +38,7 @@ func Init(c *cfg.Configuration) {
 	tokens = dynamodb.NewFromConfig(sdkConfig)
 	cfg := cache.Configuration().SetMaxSize(1024).SetDefaultTTL(30 * time.Minute)
 	tokenCache = cache.NewLRUCache(cfg)
+	ourConfig = c
 }
 
 // PutToken info in dynamo and cache
