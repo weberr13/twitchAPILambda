@@ -18,12 +18,10 @@ import (
 	"github.com/weberr13/twitchAPILambda/tokenstore"
 	twitchapi "github.com/weberr13/twitchAPILambda/twitch"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/twitch"
 )
 
 var (
 	ourConfig    *config.Configuration
-	scopes       = []string{"clips:edit"}
 	oauth2Config *oauth2.Config
 )
 
@@ -34,6 +32,10 @@ func init() {
 
 func runCommand(w http.ResponseWriter, r *http.Request, cmd, name, id, token string) error {
 	switch cmd {
+	case "chattoken":
+
+	case "chatbot":
+
 	case "clip":
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, fmt.Sprintf("https://api.twitch.tv/helix/clips?broadcaster_id=%s", id), nil)
 		if err != nil {
@@ -58,8 +60,8 @@ func runCommand(w http.ResponseWriter, r *http.Request, cmd, name, id, token str
 			if err != nil {
 				idN = 0
 			}
-			tokenstore.DeleteToken(r.Context(), name, int(idN))
-			return HandleLogin(w, r)
+			tokenstore.DeleteToken(r.Context(), name, tokenstore.ClipType, int(idN))
+			return HandleLogin(w, r, oauth2Config)
 		}
 		m := twitchapi.CreateClipResponse{}
 		b, _ := io.ReadAll(resp.Body)
@@ -108,7 +110,7 @@ func runCommand(w http.ResponseWriter, r *http.Request, cmd, name, id, token str
 
 // HandleLogin is a Handler that redirects the user to Twitch for login, and provides the 'state'
 // parameter which protects against login CSRF.
-func HandleLogin(w http.ResponseWriter, r *http.Request) error {
+func HandleLogin(w http.ResponseWriter, r *http.Request, oConfig *oauth2.Config) error {
 	channel := r.Header.Get("Nightbot-Channel")
 	cmd := ""
 	if channel != "" {
@@ -151,7 +153,41 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			idN = 0
 		}
-		token := tokenstore.GetToken(r.Context(), name, int(idN))
+		ty := ""
+		switch cmd {
+		case "chattoken":
+			ty = tokenstore.ChatType
+			// Need to check secrets here!!!
+			if ourConfig.ClientID != r.Header.Get("ClientID") ||
+				ourConfig.ClientSecret != r.Header.Get("ClientSecret") {
+				_, _ = w.Write([]byte("not authorized"))
+				w.WriteHeader(http.StatusForbidden)
+				return fmt.Errorf("not authorized")
+			}
+			token := tokenstore.GetToken(r.Context(), name, ty, int(idN))
+			if token == "" {
+				_, _ = w.Write([]byte(fmt.Sprintf(`Please authorize or re-authorize the app by vistiting %s?name=%s&channel=%s`, ourConfig.OurURL, name, id)))
+				w.WriteHeader(http.StatusUnauthorized)
+				return nil
+			}
+			tr := config.TokenResponse{
+				Token: token,
+			}
+			b, _ := json.Marshal(tr)
+			_, _ = w.Write(b)
+			w.WriteHeader(http.StatusOK)
+			return nil
+		case "clip":
+			ty = tokenstore.ClipType
+		case "chat":
+			ty = tokenstore.ChatType
+		default:
+			e := fmt.Errorf("invalid cmd type %s", cmd)
+			_, _ = w.Write([]byte(e.Error()))
+			w.WriteHeader(http.StatusBadRequest)
+			return e
+		}
+		token := tokenstore.GetToken(r.Context(), name, ty, int(idN))
 		if token == "" {
 			_, _ = w.Write([]byte(fmt.Sprintf(`Please authorize or re-authorize the app by vistiting %s?name=%s&channel=%s`, ourConfig.OurURL, name, id)))
 			w.WriteHeader(http.StatusUnauthorized)
@@ -159,10 +195,23 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) error {
 		}
 		return runCommand(w, r, cmd, name, id, token)
 	}
+	// The User has clicked the "Please reauthorize link"
 	token := jwt.New(jwt.SigningMethodHS256)
 	claims := token.Claims.(jwt.MapClaims)
 	name := r.URL.Query().Get("name")
 	id := r.URL.Query().Get("channel")
+	t := r.URL.Query().Get("type")
+	switch t {
+	case "":
+		t = "clip"
+	case "chat":
+		oConfig = ourConfig.GetChatOauth()
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("please specify a valid type authorization"))
+		return nil
+	}
+
 	if name == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte("please specify the twitch username for authorization"))
@@ -170,6 +219,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) error {
 	}
 	claims["channelID"] = id
 	claims["name"] = name
+	claims["authType"] = t
 	rbytes := make([]byte, 127)
 	_, _ = rand.Read(rbytes)
 	claims["rand"] = string(rbytes)
@@ -181,8 +231,8 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("cannot sign %w", err)
 	}
 
-	log.Printf("redirecting to: " + oauth2Config.AuthCodeURL(tokenString))
-	http.Redirect(w, r, oauth2Config.AuthCodeURL(tokenString), http.StatusTemporaryRedirect)
+	log.Printf("redirecting to: " + oConfig.AuthCodeURL(tokenString))
+	http.Redirect(w, r, oConfig.AuthCodeURL(tokenString), http.StatusTemporaryRedirect)
 	log.Printf("state is %s", tokenString)
 
 	return nil
@@ -244,13 +294,7 @@ func main() {
 	// Gob encoding for gorilla/sessions
 	gob.Register(&oauth2.Token{})
 
-	oauth2Config = &oauth2.Config{
-		ClientID:     ourConfig.ClientID,
-		ClientSecret: ourConfig.ClientSecret,
-		Scopes:       scopes,
-		Endpoint:     twitch.Endpoint,
-		RedirectURL:  ourConfig.RedirectURL,
-	}
+	oauth2Config = ourConfig.GetClipOauth()
 	lambada.Serve(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "/redirect"):
@@ -264,6 +308,7 @@ func main() {
 			}
 			name, ok := claims["name"].(string)
 			id, okid := claims["channelID"].(string)
+			ty, oktype := claims["authType"].(string)
 			channelID := int64(0)
 			if okid {
 				channelID, err = strconv.ParseInt(id, 10, 64)
@@ -271,8 +316,19 @@ func main() {
 					channelID = 0
 				}
 			}
+			if !oktype {
+				ty = tokenstore.ClipType
+			}
+			switch ty {
+			case tokenstore.ChatType:
+			case tokenstore.ClipType:
+			default:
+				_, _ = w.Write([]byte(fmt.Sprintf(`{"error": "invalid type %s"}`, ty)))
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
 			if ok && name != "" {
-				err := tokenstore.PutToken(r.Context(), name, token.AccessToken, int(channelID))
+				err := tokenstore.PutToken(r.Context(), name, ty, token.AccessToken, int(channelID))
 				if err != nil {
 					w.WriteHeader(http.StatusInternalServerError)
 					_, _ = w.Write([]byte(fmt.Sprintf("failure to store token %s", err)))
@@ -287,7 +343,7 @@ func main() {
 			_, _ = w.Write([]byte("Success!  You can close this window"))
 		default:
 			log.Print("this is not a redirect")
-			err := HandleLogin(w, r)
+			err := HandleLogin(w, r, oauth2Config)
 			if err != nil {
 				_, _ = w.Write([]byte(fmt.Sprintf(`{"error": "internal server error login %s"}`, err)))
 				w.WriteHeader(http.StatusInternalServerError)

@@ -6,6 +6,7 @@
 *.dylib
 main.zip
 main
+kukorohelp
 
 # Test binary, built with `go test -c`
 *.test
