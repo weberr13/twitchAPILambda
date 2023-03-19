@@ -41,16 +41,21 @@ func main() {
 	}
 	defer c.Close()
 
+	var tr *config.TokenResponse
 	for {
-		req, err := http.NewRequest(http.MethodGet, ourConfig.OurURL+"?cmd=token", nil)
+		req, err := http.NewRequest(http.MethodGet, ourConfig.OurURL+"?cmd=chattoken", nil)
 		if err != nil {
 			log.Fatalf("cannot make request: %s", err)
 		}
+		req.Header.Set("Nightbot-Channel", fmt.Sprintf("providerId=%s", channelID))
+		req.Header.Set("Nightbot-User", fmt.Sprintf("name=%s&displayName=%s&provider=twitch&providerId=%s&userLevel=moderator", channelName, channelName, channelID))
+		req.Header.Set("ClientID", ourConfig.ClientID)
+		req.Header.Set("ClientSecret", ourConfig.ClientSecret)
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			log.Fatalf("cannot do request: %s", err)
 		}
-		tr := func() *config.TokenResponse {
+		tr = func() *config.TokenResponse {
 			defer res.Body.Close()
 			b, err := io.ReadAll(res.Body)
 			if err != nil {
@@ -72,6 +77,68 @@ func main() {
 		break
 	}
 
-	// use token to auth to chat
-	fmt.Println("hello world")
+	err = c.WriteMessage(websocket.TextMessage, []byte("CAP REQ :twitch.tv/membership twitch.tv/tags twitch.tv/commands"))
+	if err != nil {
+		log.Fatalf("could not pass the cap request %s", err)
+	}
+	msgType, b, err := c.ReadMessage()
+	if err != nil {
+		log.Fatalf("could not get response %s", err)
+	}
+	if msgType == websocket.TextMessage {
+		fmt.Printf("got :%s", string(b))
+		fmt.Println("")
+	} else {
+		fmt.Println("got unexpected message type in reply")
+	}
+	passCmd := fmt.Sprintf("PASS oauth:%s", tr.Token)
+	err = c.WriteMessage(websocket.TextMessage, []byte(passCmd))
+	if err != nil {
+		log.Fatalf("could not pass the authentication %s", err)
+	}
+	err = c.WriteMessage(websocket.TextMessage, []byte("NICK Weberr13apibot"))
+	if err != nil {
+		log.Fatalf("could not pass the nick %s", err)
+	}
+	msgType, b, err = c.ReadMessage()
+	if err != nil {
+		log.Fatalf("could not get response %s", err)
+	}
+	if msgType == websocket.TextMessage {
+		// todo parse for success
+		fmt.Printf("got :%s", string(b))
+		fmt.Println("")
+	} else {
+		fmt.Println("got unexpected message type in reply")
+	}
+	err = c.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("JOIN #%s", channelName)))
+	if err != nil {
+		log.Fatalf("could not get response %s", err)
+	}
+	msgType, b, err = c.ReadMessage()
+	if err != nil {
+		log.Fatalf("could not get response %s", err)
+	}
+	if msgType == websocket.TextMessage {
+		// todo parse for success
+		fmt.Printf("got :%s", string(b))
+		fmt.Println("")
+	} else {
+		fmt.Println("got unexpected message type in reply")
+	}
+	err = c.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("PRIVMSG #%s :Hello World!", channelName)))
+	if err != nil {
+		log.Fatalf("could not get response %s", err)
+	}
+	msgType, b, err = c.ReadMessage()
+	if err != nil {
+		log.Fatalf("could not get response %s", err)
+	}
+	if msgType == websocket.TextMessage {
+		// todo parse for success
+		fmt.Printf("got :%s", string(b))
+		fmt.Println("")
+	} else {
+		fmt.Println("got unexpected message type in reply")
+	}
 }

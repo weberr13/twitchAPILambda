@@ -32,6 +32,8 @@ func init() {
 
 func runCommand(w http.ResponseWriter, r *http.Request, cmd, name, id, token string) error {
 	switch cmd {
+	case "chattoken":
+
 	case "chatbot":
 
 	case "clip":
@@ -153,6 +155,28 @@ func HandleLogin(w http.ResponseWriter, r *http.Request, oConfig *oauth2.Config)
 		}
 		ty := ""
 		switch cmd {
+		case "chattoken":
+			ty = tokenstore.ChatType
+			// Need to check secrets here!!!
+			if ourConfig.ClientID != r.Header.Get("ClientID") ||
+				ourConfig.ClientSecret != r.Header.Get("ClientSecret") {
+				_, _ = w.Write([]byte("not authorized"))
+				w.WriteHeader(http.StatusForbidden)
+				return fmt.Errorf("not authorized")
+			}
+			token := tokenstore.GetToken(r.Context(), name, ty, int(idN))
+			if token == "" {
+				_, _ = w.Write([]byte(fmt.Sprintf(`Please authorize or re-authorize the app by vistiting %s?name=%s&channel=%s`, ourConfig.OurURL, name, id)))
+				w.WriteHeader(http.StatusUnauthorized)
+				return nil
+			}
+			tr := config.TokenResponse{
+				Token: token,
+			}
+			b, _ := json.Marshal(tr)
+			_, _ = w.Write(b)
+			w.WriteHeader(http.StatusOK)
+			return nil
 		case "clip":
 			ty = tokenstore.ClipType
 		case "chat":
