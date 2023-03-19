@@ -56,15 +56,15 @@ fmt-pipeline:
 
 test: download
 	@echo unit tests
-	go test -race --count=1 $$(go list -f {{.Dir}} ./... | grep -v /vendor/ | grep -v /.cache/pkg/mod/ | grep /twitchAPILambda/ )
+	go test --count=1 $$(go list -f {{.Dir}} ./... | grep -v /vendor/ | grep -v /.cache/pkg/mod/ | grep /twitchAPILambda/ )
 
 test-pipeline: 
 	@echo unit tests
-	go test -race --count=1 $$(go list -f '{{.Dir}}' ./... | grep -v /vendor/ | grep -v .cache)
+	go test --count=1 $$(go list -f '{{.Dir}}' ./... | grep -v /vendor/ | grep -v .cache)
 
 integration-test: download
 	@echo integration tests
-	go test -race --tags=integration --count=1 $$(go list -f {{.Dir}} ./... | grep -v /vendor/ | grep -v /.cache/pkg/mod/ | grep /twitchAPILambda/ )
+	go test --tags=integration --count=1 $$(go list -f {{.Dir}} ./... | grep -v /vendor/ | grep -v /.cache/pkg/mod/ | grep /twitchAPILambda/ )
 
 doc: download
 	@echo creating godocs
@@ -89,4 +89,8 @@ build: download
 	@GOOS=linux GOARCH=amd64 go build -o main main.go
 	@zip main.zip main
 
-all: download fmt vet lint test integration-test doc build
+build-windows: download
+	@echo building local windows 
+	@go build -o kukorohelp ./cmd/kukoro
+
+all: download fmt vet lint test integration-test doc build build-windows

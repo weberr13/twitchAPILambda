@@ -15,6 +15,13 @@ import (
 	cfg "github.com/weberr13/twitchAPILambda/config"
 )
 
+const (
+	// ClipType is for storing auth tokens for clipping
+	ClipType = "clip"
+	// ChatType is for storing auth tokens for chatbots like kukorohelper
+	ChatType = "chat"
+)
+
 var (
 	tokenCache *cache.LRUCache
 	tokens     *dynamodb.Client
@@ -41,8 +48,15 @@ func Init(c *cfg.Configuration) {
 	ourConfig = c
 }
 
+// DBName is the name used for searching for tokens
+func DBName(name, ty string) string {
+	return fmt.Sprintf("%s:%s", name, ty)
+}
+
 // PutToken info in dynamo and cache
-func PutToken(ctx context.Context, name, token string, channelID int) error {
+func PutToken(ctx context.Context, n, ty, token string, channelID int) error {
+	name := DBName(n, ty)
+
 	todo := TokenDB{
 		Name:      name,
 		Token:     token,
@@ -69,7 +83,8 @@ func PutToken(ctx context.Context, name, token string, channelID int) error {
 }
 
 // DeleteToken info from dynamo and cache
-func DeleteToken(ctx context.Context, name string, channel int) {
+func DeleteToken(ctx context.Context, n, ty string, channel int) {
+	name := DBName(n, ty)
 	key, err := attributevalue.Marshal(name)
 	if err != nil {
 		log.Printf("failed to delete stale token %s", err)
@@ -99,7 +114,8 @@ func DeleteToken(ctx context.Context, name string, channel int) {
 }
 
 // GetToken info from dynamo and cache
-func GetToken(ctx context.Context, name string, channel int) string {
+func GetToken(ctx context.Context, n, ty string, channel int) string {
+	name := DBName(n, ty)
 	v, ok := tokenCache.Get(fmt.Sprintf("%s:%d", name, channel))
 	if ok {
 		token, ok := v.(string)
