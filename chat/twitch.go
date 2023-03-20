@@ -95,13 +95,13 @@ func (t *Twitch) Authenticate(name, token string) error {
 		if strings.Contains(strings.ToLower(string(b)), "login authentication failed") {
 			return ErrAuthFailed
 		}
-// :tmi.twitch.tv 001 weberr13 :Welcome, GLHF!
-// :tmi.twitch.tv 002 weberr13 :Your host is tmi.twitch.tv
-// :tmi.twitch.tv 003 weberr13 :This server is rather new
-// :tmi.twitch.tv 004 weberr13 :-
-// :tmi.twitch.tv 375 weberr13 :-
-// :tmi.twitch.tv 372 weberr13 :You are in a maze of twisty passages, all alike.
-// :tmi.twitch.tv 376 weberr13 :>
+		// :tmi.twitch.tv 001 weberr13 :Welcome, GLHF!
+		// :tmi.twitch.tv 002 weberr13 :Your host is tmi.twitch.tv
+		// :tmi.twitch.tv 003 weberr13 :This server is rather new
+		// :tmi.twitch.tv 004 weberr13 :-
+		// :tmi.twitch.tv 375 weberr13 :-
+		// :tmi.twitch.tv 372 weberr13 :You are in a maze of twisty passages, all alike.
+		// :tmi.twitch.tv 376 weberr13 :>
 		fmt.Printf("got :%s", string(b))
 		fmt.Println("")
 	} else {
@@ -160,8 +160,8 @@ func (t *Twitch) SendMessage(channelName, msg string) error {
 		// todo parse for success
 		fmt.Printf("send message response :%s", string(b))
 		fmt.Println("")
-// :weberr13.tmi.twitch.tv 353 weberr13 = #weberr13 :weberr13
-// :weberr13.tmi.twitch.tv 366 weberr13 #weberr13 :End of /NAMES list
+		// :weberr13.tmi.twitch.tv 353 weberr13 = #weberr13 :weberr13
+		// :weberr13.tmi.twitch.tv 366 weberr13 #weberr13 :End of /NAMES list
 	} else {
 		fmt.Println("got unexpected message type in reply")
 	}
