@@ -3,9 +3,12 @@ package config
 import (
 	_ "embed" // embed the config in the binary for now
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/twitch"
@@ -107,4 +110,66 @@ func NewConfig() *Configuration {
 		}
 	}
 	return ourConfig
+}
+
+func (c Configuration) setCommandHeaders(req *http.Request, channelID, channelName string) {
+	req.Header.Set("Nightbot-Channel", fmt.Sprintf("providerId=%s", channelID))
+	req.Header.Set("Nightbot-User", fmt.Sprintf("name=%s&displayName=%s&provider=twitch&providerId=%s&userLevel=moderator", channelName, channelName, channelID))
+	req.Header.Set("ClientID", c.ClientID)
+	req.Header.Set("ClientSecret", c.ClientSecret)
+}
+
+// InvalidateToken that failed to authenticate previously
+func (c Configuration) InvalidateToken(channelID, channelName string) error {
+	req, err := http.NewRequest(http.MethodGet, c.OurURL+"?cmd=delchattoken", nil)
+	if err != nil {
+		return fmt.Errorf("cannot make request: %w", err)
+	}
+	c.setCommandHeaders(req, channelID, channelName)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("cannot do request: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("could not invalidate old token, fatal error")
+	}
+	return nil
+}
+
+// GetAuthTokenResponse from the backend server
+func (c Configuration) GetAuthTokenResponse(channelID, channelName string) (*TokenResponse, error) {
+	var tr *TokenResponse
+	for {
+		req, err := http.NewRequest(http.MethodGet, c.OurURL+"?cmd=chattoken", nil)
+		if err != nil {
+			return nil, fmt.Errorf("cannot make request: %w", err)
+		}
+		c.setCommandHeaders(req, channelID, channelName)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("cannot do request: %w", err)
+		}
+		tr = func() *TokenResponse {
+			defer res.Body.Close()
+			b, err := io.ReadAll(res.Body)
+			if err != nil {
+				return nil
+			}
+			tr := TokenResponse{}
+			err = json.Unmarshal(b, &tr)
+			if err != nil {
+				return nil
+			}
+			return &tr
+		}()
+		if tr == nil || tr.Token == "" {
+			fmt.Printf(`Please authorize or re-authorize the app by vistiting %s?name=%s&channel=%s&type=chat`, c.OurURL, channelName, channelID)
+			fmt.Println("")
+			time.Sleep(30 * time.Second)
+			continue
+		}
+		break
+	}
+	return tr, nil
 }

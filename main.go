@@ -155,9 +155,19 @@ func HandleLogin(w http.ResponseWriter, r *http.Request, oConfig *oauth2.Config)
 		}
 		ty := ""
 		switch cmd {
+		case "delchattoken":
+			ty = tokenstore.ChatType
+			if ourConfig.ClientID != r.Header.Get("ClientID") ||
+				ourConfig.ClientSecret != r.Header.Get("ClientSecret") {
+				_, _ = w.Write([]byte("not authorized"))
+				w.WriteHeader(http.StatusForbidden)
+				return fmt.Errorf("not authorized")
+			}
+			tokenstore.DeleteToken(r.Context(), name, ty, int(idN))
+			w.WriteHeader(http.StatusOK)
+			return nil
 		case "chattoken":
 			ty = tokenstore.ChatType
-			// Need to check secrets here!!!
 			if ourConfig.ClientID != r.Header.Get("ClientID") ||
 				ourConfig.ClientSecret != r.Header.Get("ClientSecret") {
 				_, _ = w.Write([]byte("not authorized"))
