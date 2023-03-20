@@ -84,13 +84,19 @@ doc-pipeline:
 	@cat make-doc-tmp-00 docs/index.html.in make-doc-tmp-01 > docs/index.html
 	@rm make-doc-tmp-00 make-doc-tmp-01
 
-build: download
+build: download build-windows build-mac
 	@echo building binaries
 	@GOOS=linux GOARCH=amd64 go build -o main main.go
 	@zip main.zip main
 
 build-windows: download
 	@echo building local windows 
-	@go build -o kukorohelp ./cmd/kukoro
+	@GOOS=windows GOARCH=amd64 go build -o kukorohelp.exe ./cmd/kukoro
+	@zip kukorohelp.zip kukorohelp.exe
+
+build-mac: download
+	@echo building local macos 
+	@GOOS=darwin GOARCH=amd64 go build -o kukorohelp-darwin ./cmd/kukoro
+	@zip kukorohelp-darwin.zip kukorohelp-darwin
 
 all: download fmt vet lint test integration-test doc build build-windows

@@ -7,6 +7,10 @@
 main.zip
 main
 kukorohelp
+kukorohelp-darwin
+kukorohelp-darwin.zip
+kukorohelp.zip
+
 
 # Test binary, built with `go test -c`
 *.test

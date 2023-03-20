@@ -47,7 +47,7 @@ func main() {
 		log.Printf("could not set chat ops: %s", err)
 		return
 	}
-	auth:
+auth:
 	for {
 		log.Printf("attempting to authenticate")
 		err = tw.Authenticate("weberr13", tr.Token)
@@ -74,7 +74,7 @@ func main() {
 		log.Printf("could not join channel on twitch: %s", err)
 		return
 	}
-	readloop:
+readloop:
 	for {
 		msg, err := tw.ReceiveOneMessage()
 		if err == chat.ErrInvalidMsg {
@@ -82,7 +82,7 @@ func main() {
 			continue
 		}
 		switch msg.Type() {
-		case chat.PrivateMessage: 
+		case chat.PrivateMessage:
 			switch {
 			case pcg.IsSpawnCommand(msg):
 				err = pcg.CheckPokemon(channelName, tw)
@@ -97,19 +97,19 @@ func main() {
 			case msg.IsBotCommand():
 				switch msg.GetBotCommand() {
 				case "kukoro":
-					err = tw.SendMessage(channelName, "!getinfo "+ msg.DisplayName())
+					err = tw.SendMessage(channelName, "!getinfo "+msg.DisplayName())
 					if err != nil {
 						log.Printf("could not send getinfo for %s: %s", msg.DisplayName(), err)
 					}
 					continue readloop
 				case "jump":
-					err = tw.SendMessage(channelName, "!getinfo "+ msg.DisplayName())
+					err = tw.SendMessage(channelName, "!getinfo "+msg.DisplayName())
 					if err != nil {
 						log.Printf("could not send getinfo for %s: %s", msg.DisplayName(), err)
 					}
 					continue readloop
 				case "vote":
-					err = tw.SendMessage(channelName, "!getinfo "+ msg.GetBotCommandArgs())
+					err = tw.SendMessage(channelName, "!getinfo "+msg.GetBotCommandArgs())
 					if err != nil {
 						log.Printf("could not send getinfo for %s: %s", msg.DisplayName(), err)
 					}
@@ -124,7 +124,7 @@ func main() {
 
 				log.Printf("command: %s, args: %s", msg.GetBotCommand(), msg.GetBotCommandArgs())
 			default:
-			log.Printf(`%s says: "%s"`, msg.DisplayName(), msg.Body())
+				log.Printf(`%s says: "%s"`, msg.DisplayName(), msg.Body())
 			}
 		case chat.PingMessage:
 			err := tw.Pong(msg)
@@ -143,7 +143,6 @@ func main() {
 	// 	log.Printf("could not send message: %s", err)
 	// 	return
 	// }
-
 
 	// log.Printf(`%s says: "%s"`, msg.DisplayName(), msg.Body())
 }
