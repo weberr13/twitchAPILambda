@@ -158,10 +158,44 @@ func (t *Twitch) SendMessage(channelName, msg string) error {
 	}
 	if msgType == websocket.TextMessage {
 		// todo parse for success
-		fmt.Printf("got :%s", string(b))
+		fmt.Printf("send message response :%s", string(b))
 		fmt.Println("")
+// :weberr13.tmi.twitch.tv 353 weberr13 = #weberr13 :weberr13
+// :weberr13.tmi.twitch.tv 366 weberr13 #weberr13 :End of /NAMES list
 	} else {
 		fmt.Println("got unexpected message type in reply")
+	}
+	return nil
+}
+
+// ReceiveOneMessage waits for a message to be posted to chat
+func (t *Twitch) ReceiveOneMessage() (TwitchMessage, error) {
+	msg := TwitchMessage{}
+	if t.c == nil {
+		return msg, ErrNoConnection
+	}
+	msgType, b, err := t.c.ReadMessage()
+	if err != nil {
+		return msg, fmt.Errorf("could not get message %w", err)
+	}
+	if msgType == websocket.TextMessage {
+		err = msg.Parse(b)
+		return msg, err
+	}
+	return msg, fmt.Errorf("got unexpected message type in reply")
+}
+
+// Pong is keep alive
+func (t *Twitch) Pong(msg TwitchMessage) error {
+	if t.c == nil {
+		return ErrNoConnection
+	}
+	if msg.Type() != PingMessage {
+		return nil
+	}
+	err := t.c.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("PONG :%s", msg.Body())))
+	if err != nil {
+		return fmt.Errorf("could not send keep alive %w", err)
 	}
 	return nil
 }
