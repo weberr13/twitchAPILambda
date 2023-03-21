@@ -133,9 +133,9 @@ readloop:
 				return
 			}
 		case chat.JoinMessage:
-
-		default:
-			log.Printf("unknown message %s", msg.Raw())
+			log.Printf("users %v joined the channel", msg.Users())
+		case chat.PartMessage:
+			log.Printf("users %v left the channel", msg.Users())
 		}
 	}
 	// err = tw.SendMessage(channelName, "!songs current")
