@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net/url"
-	"strings"
 
 	"github.com/gorilla/websocket"
 	"github.com/weberr13/twitchAPILambda/config"
@@ -57,10 +56,12 @@ func (t *Twitch) SetChatOps() error {
 	if err != nil {
 		return fmt.Errorf("could not get response %w", err)
 	}
-	// got ::tmi.twitch.tv CAP * ACK :twitch.tv/membership twitch.tv/tags twitch.tv/commands
 	if msgType == websocket.TextMessage {
-		fmt.Printf("got :%s", string(b))
-		fmt.Println("")
+		var msg TwitchMessage
+		err := msg.Parse(b)
+		if err != nil {
+			return fmt.Errorf("failed to get chat ops response")
+		}
 	} else {
 		fmt.Println("got unexpected message type in reply")
 	}
@@ -92,18 +93,14 @@ func (t *Twitch) Authenticate(name, token string) error {
 		return fmt.Errorf("could not get response %w", err)
 	}
 	if msgType == websocket.TextMessage {
-		if strings.Contains(strings.ToLower(string(b)), "login authentication failed") {
+		var msg TwitchMessage
+		err := msg.Parse(b)
+		if err != nil {
+			return fmt.Errorf("failed to get auth response")
+		}
+		if msg.Type() == AuthenticationFail {
 			return ErrAuthFailed
 		}
-		// :tmi.twitch.tv 001 weberr13 :Welcome, GLHF!
-		// :tmi.twitch.tv 002 weberr13 :Your host is tmi.twitch.tv
-		// :tmi.twitch.tv 003 weberr13 :This server is rather new
-		// :tmi.twitch.tv 004 weberr13 :-
-		// :tmi.twitch.tv 375 weberr13 :-
-		// :tmi.twitch.tv 372 weberr13 :You are in a maze of twisty passages, all alike.
-		// :tmi.twitch.tv 376 weberr13 :>
-		fmt.Printf("got :%s", string(b))
-		fmt.Println("")
 	} else {
 		return ErrAuthFailed
 	}
@@ -135,8 +132,11 @@ func (t *Twitch) JoinChannels(channels ...string) error {
 	}
 	if msgType == websocket.TextMessage {
 		// todo parse for success
-		fmt.Printf("got :%s", string(b))
-		fmt.Println("")
+		var msg TwitchMessage
+		err := msg.Parse(b)
+		if err != nil {
+			return fmt.Errorf("failed to get join response")
+		}
 	} else {
 		return fmt.Errorf("got unexpected message type in reply")
 	}
@@ -157,11 +157,11 @@ func (t *Twitch) SendMessage(channelName, msg string) error {
 		return fmt.Errorf("could not get response %w", err)
 	}
 	if msgType == websocket.TextMessage {
-		// todo parse for success
-		fmt.Printf("send message response :%s", string(b))
-		fmt.Println("")
-		// :weberr13.tmi.twitch.tv 353 weberr13 = #weberr13 :weberr13
-		// :weberr13.tmi.twitch.tv 366 weberr13 #weberr13 :End of /NAMES list
+		var msg TwitchMessage
+		err := msg.Parse(b)
+		if err != nil {
+			return fmt.Errorf("failed to get send response")
+		}
 	} else {
 		fmt.Println("got unexpected message type in reply")
 	}
