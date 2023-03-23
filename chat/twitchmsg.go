@@ -91,6 +91,11 @@ func (c *TwitchMessage) Parse(b []byte) error {
 		}
 
 		return nil
+	case strings.Contains(c.raw, "twitch.tv NOTICE * :Login authentication failed"):
+		log.Printf("failed to authenticate")
+		c.t = AuthenticationFail
+		return nil
+	// twitch.tv NOTICE * :Login authentication failed	
 	case strings.Contains(c.raw,"twitch.tv USERSTATE #"):
 		log.Printf("Send message sucess/userstate")
 		// log.Print(c.raw)
@@ -104,6 +109,7 @@ func (c *TwitchMessage) Parse(b []byte) error {
 		// c2-7a534f08248e,9cf067fb-8144-40e0-9516-79fc2e442b05,9e33fa98-b1e8-4593-9e68-30c8cac92ce4,a3d56025-447d-490e-b4db-8168d3f7c5a5,c0e9e8
 		// 5b-6d1f-4bf7-8397-141fce19f987,e2a148df-2997-4bf3-978a-acc33fe2e9dd,e516804c-e5a3-4aa1-892c-c646004c4088;id=3d63aebc-642d-4d76-adf9-7
 		// a3dacaa5267;mod=0;subscriber=1;user-type= :tmi.twitch.tv USERSTATE #weberr13
+		return nil
 	case strings.Contains(c.raw, "twitch.tv 001") &&
 		strings.Contains(c.raw, "twitch.tv 002") &&
 		strings.Contains(c.raw, "twitch.tv 003") &&
