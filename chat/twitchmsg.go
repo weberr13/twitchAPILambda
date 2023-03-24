@@ -43,9 +43,49 @@ type TwitchMessage struct {
 	users       map[string]string
 	msg         string
 	displayname string
+	preambleKV map[string]string
 }
 
 // TODO parse the preambles into a map since it is all k=v
+
+func (c *TwitchMessage) parsePreamble() {
+	// @badge-info=;
+	// badges=vip/1;
+	// color=#FF0000;
+	// display-name=PokemonCommunityGame;
+	// emotes=;
+	// first-msg=0;
+	// flags=;
+	// id=7758397c-a244-40e2-82f1-68041d977aba;
+	// mod=0;
+	// returning-chatter=0;
+	// room-id=403503512;
+	// subscriber=0;
+	// tmi-sent-ts=1679277344587;
+	// turbo=0;
+	// user-id=519435394;
+	// user-type=;
+	// vip=1 :pokemoncommunitygame!pokemoncommunitygame@pokemoncommunitygame.tmi.twitch.tv PRIVMSG #weberr13 :
+
+	if !strings.HasPrefix(c.raw, "@") {
+		return
+	}
+	split := strings.SplitN(c.raw, " ", 2)
+	if len(split) < 2 {
+		return
+	}
+	c.preambleKV = map[string]string{}
+	kvs := strings.Split(split[0][1:], ";")
+	for _, kv := range kvs {
+		k := strings.SplitN(kv, "=", 2)
+		if len(k) == 2 {
+			c.preambleKV[k[0]] = k[1]
+		}
+	}
+	if n, ok := c.preambleKV["display-name"]; ok {
+		c.displayname = n
+	}
+}
 
 // Parse message from the websocket read
 func (c *TwitchMessage) Parse(b []byte) error {
@@ -53,7 +93,7 @@ func (c *TwitchMessage) Parse(b []byte) error {
 		c.users = map[string]string{}
 	}
 	c.raw = string(b)
-	// do better than this hack in the future
+	c.parsePreamble()
 	switch {
 	case strings.Contains(c.raw, "twitch.tv PRIVMSG #"):
 		// DO THIS FIRST TO AVOID CLEVERLY DESIGNED MESSAGES IN BODY TO TRICK US!!!!
@@ -71,24 +111,10 @@ func (c *TwitchMessage) Parse(b []byte) error {
 		if len(splits) == 2 {
 			c.user = splits[0]
 		}
-		if c.tags[0] == '@' {
-			c.tags = c.tags[1:]
-		}
-		splits = strings.Split(c.tags, ";")
-		for _, split := range splits {
-			kv := strings.SplitN(split, "=", 2)
-			if len(kv) == 2 {
-				switch kv[0] {
-				case "display-name":
-					c.displayname = kv[1]
-				}
-			}
-		}
 		splits = strings.SplitN(c.msg, ":", 2)
 		if len(splits) == 2 {
 			c.msg = splits[1]
 		}
-
 		return nil
 	case strings.Contains(c.raw, "twitch.tv NOTICE * :Login authentication failed"):
 		log.Printf("failed to authenticate")

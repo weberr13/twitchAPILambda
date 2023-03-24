@@ -18,3 +18,34 @@ func IsSpawnCommand(msg chat.TwitchMessage) bool {
 func CheckPokemon(channelName string, tw *chat.Twitch) error {
 	return tw.SendMessage(channelName, "!pokecheck")
 }
+
+// CatchPokemon catch a pokemon automatically
+func CatchPokemon(channelName string, tw *chat.Twitch, ball string) error {
+	return tw.SendMessage(channelName, "!pokecatch "+ball)
+}
+
+// IsCaught checks if a pcg check command response indicates the user has the pokemon
+func IsCaught(msg chat.TwitchMessage) (bool) {
+	// @weberr13 Sentret registered in Pokédex: ✔
+	if msg.DisplayName() == "PokemonCommunityGame" && strings.Contains(msg.Body(), "registered in Pokédex") {
+		if strings.Contains(msg.Body(), "registered in Pokédex: ✔") {
+			return true
+		}
+	}
+	return false
+}
+
+// IsCaughtUser is the user who ran !pokecheck
+func IsCaughtUser(msg chat.TwitchMessage) string {
+	if msg.DisplayName() == "PokemonCommunityGame" && strings.Contains(msg.Body(), "registered in Pokédex") {
+		split := strings.SplitN(msg.Body(), " ", 2)
+		if len(split) != 2 {
+			return ""
+		}
+		user := split[0][1:]
+		if strings.Contains(msg.Body(), "registered in Pokédex: ✔") {
+			return user
+		}
+	}
+	return ""
+}
