@@ -95,8 +95,8 @@ func (c *TwitchMessage) Parse(b []byte) error {
 		log.Printf("failed to authenticate")
 		c.t = AuthenticationFail
 		return nil
-	// twitch.tv NOTICE * :Login authentication failed	
-	case strings.Contains(c.raw,"twitch.tv USERSTATE #"):
+	// twitch.tv NOTICE * :Login authentication failed
+	case strings.Contains(c.raw, "twitch.tv USERSTATE #"):
 		log.Printf("Send message sucess/userstate")
 		// log.Print(c.raw)
 		c.t = UserStateMessage
@@ -221,7 +221,7 @@ func (c *TwitchMessage) Parse(b []byte) error {
 		}
 
 		return nil
-	
+
 	case strings.Contains(c.raw, "login authentication failed"):
 		log.Print("Authenticatin failed")
 		log.Print(c.raw)

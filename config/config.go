@@ -7,8 +7,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os/exec"
+	"runtime"
 	"strings"
-	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/twitch"
@@ -20,6 +21,8 @@ var configBytes []byte
 var (
 	clipScope = []string{"clips:edit"}
 	chatScope = []string{"chat:edit", "chat:read"}
+	// ErrNeedAuthorization
+	ErrNeedAuthorization = fmt.Errorf("user needs to authorize the app")
 )
 
 // LevelAsNumber maps user levels to a number with owner == 0
@@ -140,36 +143,64 @@ func (c Configuration) InvalidateToken(channelID, channelName string) error {
 // GetAuthTokenResponse from the backend server
 func (c Configuration) GetAuthTokenResponse(channelID, channelName string) (*TokenResponse, error) {
 	var tr *TokenResponse
-	for {
-		req, err := http.NewRequest(http.MethodGet, c.OurURL+"?cmd=chattoken", nil)
-		if err != nil {
-			return nil, fmt.Errorf("cannot make request: %w", err)
-		}
-		c.setCommandHeaders(req, channelID, channelName)
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("cannot do request: %w", err)
-		}
-		tr = func() *TokenResponse {
-			defer res.Body.Close()
-			b, err := io.ReadAll(res.Body)
-			if err != nil {
-				return nil
-			}
-			tr := TokenResponse{}
-			err = json.Unmarshal(b, &tr)
-			if err != nil {
-				return nil
-			}
-			return &tr
-		}()
-		if tr == nil || tr.Token == "" {
-			fmt.Printf(`Please authorize or re-authorize the app by vistiting %s?name=%s&channel=%s&type=chat`, c.OurURL, channelName, channelID)
-			fmt.Println("")
-			time.Sleep(30 * time.Second)
-			continue
-		}
-		break
+	req, err := http.NewRequest(http.MethodGet, c.OurURL+"?cmd=chattoken", nil)
+	if err != nil {
+		return nil, fmt.Errorf("cannot make request: %w", err)
 	}
+	c.setCommandHeaders(req, channelID, channelName)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cannot do request: %w", err)
+	}
+	tr = func() *TokenResponse {
+		defer res.Body.Close()
+		b, err := io.ReadAll(res.Body)
+		if err != nil {
+			return nil
+		}
+		fmt.Printf("got: %s", string(b))
+		tr := TokenResponse{}
+		err = json.Unmarshal(b, &tr)
+		if err != nil {
+			return nil
+		}
+		return &tr
+	}()
+	if tr == nil || tr.Token == "" {
+		authURL := fmt.Sprintf(`%s?name=%s&channel=%s&type=chat`, c.OurURL, channelName, channelID)
+		_ = open(authURL)
+		fmt.Printf("Check your default browser and allow the bot to access your chat and restart.  If your browser does not open visit %s by hand.", authURL)
+		fmt.Println("")
+
+		return nil, ErrNeedAuthorization
+	}
+
 	return tr, nil
+}
+
+// https://stackoverflow.com/questions/39320371/how-start-web-server-to-open-page-in-browser-in-golang
+// open opens the specified URL in the default browser of the user.
+func open(url string) error {
+    var cmd string
+    var args []string
+
+    switch runtime.GOOS {
+    case "windows":
+        cmd = "cmd"
+        args = []string{"/c", "start"}
+		// others? https://www.robvanderwoude.com/escapechars.php
+		args = append(args, strings.ReplaceAll(url, "&", "^&"))
+    case "darwin":
+        cmd = "open"
+		args = append(args, url)
+    default: // "linux", "freebsd", "openbsd", "netbsd"
+        cmd = "xdg-open"
+		args = append(args, url)
+    }
+    cmdE := exec.Command(cmd, args...)
+	err := cmdE.Start()
+	if err != nil {
+		return err
+	}
+	return cmdE.Wait()
 }
