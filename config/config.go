@@ -21,7 +21,7 @@ var configBytes []byte
 var (
 	clipScope = []string{"clips:edit"}
 	chatScope = []string{"chat:edit", "chat:read"}
-	// ErrNeedAuthorization
+	// ErrNeedAuthorization is returned because we need to restart after auth is created
 	ErrNeedAuthorization = fmt.Errorf("user needs to authorize the app")
 )
 
@@ -178,26 +178,25 @@ func (c Configuration) GetAuthTokenResponse(channelID, channelName string) (*Tok
 	return tr, nil
 }
 
-// https://stackoverflow.com/questions/39320371/how-start-web-server-to-open-page-in-browser-in-golang
 // open opens the specified URL in the default browser of the user.
 func open(url string) error {
-    var cmd string
-    var args []string
+	var cmd string
+	var args []string
 
-    switch runtime.GOOS {
-    case "windows":
-        cmd = "cmd"
-        args = []string{"/c", "start"}
+	switch runtime.GOOS {
+	case "windows":
+		cmd = "cmd"
+		args = []string{"/c", "start"}
 		// others? https://www.robvanderwoude.com/escapechars.php
 		args = append(args, strings.ReplaceAll(url, "&", "^&"))
-    case "darwin":
-        cmd = "open"
+	case "darwin":
+		cmd = "open"
 		args = append(args, url)
-    default: // "linux", "freebsd", "openbsd", "netbsd"
-        cmd = "xdg-open"
+	default: // "linux", "freebsd", "openbsd", "netbsd"
+		cmd = "xdg-open"
 		args = append(args, url)
-    }
-    cmdE := exec.Command(cmd, args...)
+	}
+	cmdE := exec.Command(cmd, args...)
 	err := cmdE.Start()
 	if err != nil {
 		return err

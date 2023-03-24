@@ -93,6 +93,7 @@ auth:
 		log.Printf("could not join channel on twitch: %s", err)
 		return
 	}
+	knownusers := map[string]string{}
 readloop:
 	for {
 		msg, err := tw.ReceiveOneMessage()
@@ -152,16 +153,24 @@ readloop:
 				return
 			}
 		case chat.JoinMessage:
-			log.Printf("users %v joined the channel", msg.Users())
+			for k, v := range msg.Users() {
+				knownusers[k] = v
+			}
+			users := []string{}
+			for k := range knownusers {
+				users = append(users, k)
+			}
+			log.Printf("current users: %v", users)
 		case chat.PartMessage:
-			log.Printf("users %v left the channel", msg.Users())
+			for k := range msg.Users() {
+				log.Printf("user %s has left", k)
+				delete(knownusers, k)
+			}
+			users := []string{}
+			for k := range knownusers {
+				users = append(users, k)
+			}
+			log.Printf("current users: %v", users)
 		}
 	}
-	// err = tw.SendMessage(channelName, "!songs current")
-	// if err != nil {
-	// 	log.Printf("could not send message: %s", err)
-	// 	return
-	// }
-
-	// log.Printf(`%s says: "%s"`, msg.DisplayName(), msg.Body())
 }

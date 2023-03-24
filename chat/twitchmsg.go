@@ -41,7 +41,6 @@ type TwitchMessage struct {
 	tags        string
 	user        string
 	users       map[string]string
-	uri         string
 	msg         string
 	displayname string
 }
@@ -95,7 +94,6 @@ func (c *TwitchMessage) Parse(b []byte) error {
 		log.Printf("failed to authenticate")
 		c.t = AuthenticationFail
 		return nil
-	// twitch.tv NOTICE * :Login authentication failed
 	case strings.Contains(c.raw, "twitch.tv USERSTATE #"):
 		log.Printf("Send message sucess/userstate")
 		// log.Print(c.raw)
@@ -130,7 +128,6 @@ func (c *TwitchMessage) Parse(b []byte) error {
 		return nil
 	case strings.Contains(c.raw, "twitch.tv CAP * ACK"):
 		log.Print("Capactiy")
-		// log.Print(c.raw)
 		c.t = Capacity
 		return nil
 	case strings.Contains(c.raw, "twitch.tv GLOBALUSERSTATE #"):
@@ -163,7 +160,6 @@ func (c *TwitchMessage) Parse(b []byte) error {
 		// ATE #weberr13
 		// @emote-only=0;followers-only=-1;r9k=0;room-id=403503512;slow=0;subs-only=0 :tmi.twitch.tv ROOMSTATE #weberr13
 		c.t = RoomStateMessage
-		// @emote-only=0;followers-only=-1;r9k=0;room-id=403503512;slow=0;subs-only=0 :tmi.twitch.tv ROOMSTATE #weberr13
 		return nil
 	case strings.HasPrefix(c.raw, "PING :"):
 		splits := strings.SplitN(c.raw, ":", 2)
@@ -189,21 +185,27 @@ func (c *TwitchMessage) Parse(b []byte) error {
 			}
 		}
 
-		// pokemoncommunitygame!pokemoncommunitygame@pokemoncommunitygame.tmi.twitch.tv JOIN #weberr13
+		// known bots:
+		// :pokemoncommunitygame!pokemoncommunitygame@pokemoncommunitygame.tmi.twitch.tv JOIN #weberr13
+		// :nightbot!nightbot@nightbot.tmi.twitch.tv JOIN #weberr13
+		// :elbierro!elbierro@elbierro.tmi.twitch.tv JOIN #weberr13
+
+		// suspected bots:
 		// :aliceydra!aliceydra@aliceydra.tmi.twitch.tv JOIN #weberr13
 		// :lurxx!lurxx@lurxx.tmi.twitch.tv JOIN #weberr13
 		// :paradise_for_streamers!paradise_for_streamers@paradise_for_streamers.tmi.twitch.tv JOIN #weberr13
 		// :01olivia!01olivia@01olivia.tmi.twitch.tv JOIN #weberr13
 		// :lylituf!lylituf@lylituf.tmi.twitch.tv JOIN #weberr13
-		// :nightbot!nightbot@nightbot.tmi.twitch.tv JOIN #weberr13
 		// :commanderroot!commanderroot@commanderroot.tmi.twitch.tv JOIN #weberr13
 		// :streamfahrer!streamfahrer@streamfahrer.tmi.twitch.tv JOIN #weberr13
 		// :drapsnatt!drapsnatt@drapsnatt.tmi.twitch.tv JOIN #weberr13
 		// :tacotuesday7313!tacotuesday7313@tacotuesday7313.tmi.twitch.tv JOIN #weberr13
 		// :kattah!kattah@kattah.tmi.twitch.tv JOIN #weberr13
-		// :da_panda06!da_panda06@da_panda06.tmi.twitch.tv JOIN #weberr13
 		// :einfachuwe42!einfachuwe42@einfachuwe42.tmi.twitch.tv JOIN #weberr13
-		// :elbierro!elbierro@elbierro.tmi.twitch.tv JOIN #weberr13
+
+		// real users
+		// :da_panda06!da_panda06@da_panda06.tmi.twitch.tv JOIN #weberr13
+
 		return nil
 	case strings.Contains(c.raw, "twitch.tv PART #"):
 		log.Print("PartMessage")
@@ -244,6 +246,7 @@ func (c TwitchMessage) User() string {
 	return c.user
 }
 
+// Users found in Join/Part messages
 func (c TwitchMessage) Users() map[string]string {
 	tmp := map[string]string{}
 	for k, v := range c.users {
