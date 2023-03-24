@@ -35,16 +35,21 @@ func main() {
 	if err != nil {
 		log.Fatalf("could not reach twitch: %s", err)
 	}
-	defer tw.Close()
 
 	tr, err := ourConfig.GetAuthTokenResponse(channelID, channelName)
+	if err == config.ErrNeedAuthorization {
+		tw.Close()
+		return
+	}
 	if err != nil {
 		log.Printf("could not get auth token %s", err)
+		tw.Close()
 		return
 	}
 	err = tw.SetChatOps()
 	if err != nil {
 		log.Printf("could not set chat ops: %s", err)
+		tw.Close()
 		return
 	}
 auth:
@@ -53,15 +58,28 @@ auth:
 		err = tw.Authenticate("weberr13", tr.Token)
 		if err == chat.ErrAuthFailed {
 			log.Printf("forcing token reauth")
+			tw.Close()
 			err = ourConfig.InvalidateToken(channelID, channelName)
 			if err != nil {
 				log.Printf("could not invalidate old token: %s", err)
 				return
 			}
 			log.Printf("re-fetching auth token")
+			tw, err = chat.NewTwitch(ourConfig)
+			if err != nil {
+				log.Fatalf("could not reach twitch: %s", err)
+			}
+
 			tr, err = ourConfig.GetAuthTokenResponse(channelID, channelName)
 			if err != nil {
-				log.Printf("could not invalidate old token: %s", err)
+				log.Printf("could not get auth token %s", err)
+				tw.Close()
+				return
+			}
+			err = tw.SetChatOps()
+			if err != nil {
+				log.Printf("could not set chat ops: %s", err)
+				tw.Close()
 				return
 			}
 			continue
@@ -69,11 +87,13 @@ auth:
 		log.Printf("authentication successful!")
 		break auth
 	}
+	defer tw.Close()
 	err = tw.JoinChannels(channelName)
 	if err != nil {
 		log.Printf("could not join channel on twitch: %s", err)
 		return
 	}
+	knownusers := map[string]string{}
 readloop:
 	for {
 		msg, err := tw.ReceiveOneMessage()
@@ -133,16 +153,24 @@ readloop:
 				return
 			}
 		case chat.JoinMessage:
-			log.Printf("users %v joined the channel", msg.Users())
+			for k, v := range msg.Users() {
+				knownusers[k] = v
+			}
+			users := []string{}
+			for k := range knownusers {
+				users = append(users, k)
+			}
+			log.Printf("current users: %v", users)
 		case chat.PartMessage:
-			log.Printf("users %v left the channel", msg.Users())
+			for k := range msg.Users() {
+				log.Printf("user %s has left", k)
+				delete(knownusers, k)
+			}
+			users := []string{}
+			for k := range knownusers {
+				users = append(users, k)
+			}
+			log.Printf("current users: %v", users)
 		}
 	}
-	// err = tw.SendMessage(channelName, "!songs current")
-	// if err != nil {
-	// 	log.Printf("could not send message: %s", err)
-	// 	return
-	// }
-
-	// log.Printf(`%s says: "%s"`, msg.DisplayName(), msg.Body())
 }
