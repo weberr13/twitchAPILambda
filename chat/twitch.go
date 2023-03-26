@@ -18,6 +18,21 @@ var (
 	ErrNoConnection = fmt.Errorf("no connection")
 )
 
+// Bots we know about
+func Bots() []string {
+	return []string{"nightbot", "kattah", "streamfahrer", "einfachuwe42", "aliceydra", "drapsnatt", 
+	"commanderroot", 
+	"pokemoncommunitygame", "0ax2",
+	"01ella", "own3d", "elbierro"}
+}
+
+// TrimBots from a user list
+func TrimBots(users map[string]string) {
+	for _, bot := range Bots() {
+		delete(users, bot)
+	}
+}
+
 // Twitch talks to twitch
 type Twitch struct {
 	c *websocket.Conn

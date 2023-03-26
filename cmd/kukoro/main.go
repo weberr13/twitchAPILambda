@@ -164,6 +164,7 @@ readloop:
 			for k, v := range msg.Users() {
 				knownusers[k] = v
 			}
+			chat.TrimBots(knownusers)
 			users := []string{}
 			for k := range knownusers {
 				users = append(users, k)
