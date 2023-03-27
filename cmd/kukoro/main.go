@@ -104,8 +104,8 @@ readloop:
 		switch msg.Type() {
 		case chat.PrivateMessage:
 			switch {
-			case pcg.IsCaught(msg):
-				user := pcg.IsCaughtUser(msg)
+			case pcg.IsNotCaught(msg):
+				user := pcg.IsNotCaughtUser(msg)
 				if user == "weberr13" { // the bot runs as me
 					err = pcg.CatchPokemon(channelName, tw, "ultraball")
 					if err != nil {

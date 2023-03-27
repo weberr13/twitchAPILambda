@@ -43,7 +43,7 @@ type TwitchMessage struct {
 	users       map[string]string
 	msg         string
 	displayname string
-	preambleKV map[string]string
+	preambleKV  map[string]string
 }
 
 // TODO parse the preambles into a map since it is all k=v

@@ -25,10 +25,21 @@ func CatchPokemon(channelName string, tw *chat.Twitch, ball string) error {
 }
 
 // IsCaught checks if a pcg check command response indicates the user has the pokemon
-func IsCaught(msg chat.TwitchMessage) (bool) {
+func IsCaught(msg chat.TwitchMessage) bool {
 	// @weberr13 Sentret registered in Pokédex: ✔
 	if msg.DisplayName() == "PokemonCommunityGame" && strings.Contains(msg.Body(), "registered in Pokédex") {
 		if strings.Contains(msg.Body(), "registered in Pokédex: ✔") {
+			return true
+		}
+	}
+	return false
+}
+
+// IsNotCaught checks if a pcg check command response indicates the user doesn't have the pokemon
+func IsNotCaught(msg chat.TwitchMessage) bool {
+	// @weberr13 Sentret registered in Pokédex: ✔
+	if msg.DisplayName() == "PokemonCommunityGame" && strings.Contains(msg.Body(), "registered in Pokédex") {
+		if strings.Contains(msg.Body(), "registered in Pokédex: :x:") {
 			return true
 		}
 	}
@@ -44,6 +55,21 @@ func IsCaughtUser(msg chat.TwitchMessage) string {
 		}
 		user := split[0][1:]
 		if strings.Contains(msg.Body(), "registered in Pokédex: ✔") {
+			return user
+		}
+	}
+	return ""
+}
+
+// IsNotCaughtUser checks if a pcg check command response indicates the user doesn't have the pokemon
+func IsNotCaughtUser(msg chat.TwitchMessage) string {
+	if msg.DisplayName() == "PokemonCommunityGame" && strings.Contains(msg.Body(), "registered in Pokédex") {
+		split := strings.SplitN(msg.Body(), " ", 2)
+		if len(split) != 2 {
+			return ""
+		}
+		user := split[0][1:]
+		if strings.Contains(msg.Body(), "registered in Pokédex: :x:") {
 			return user
 		}
 	}
