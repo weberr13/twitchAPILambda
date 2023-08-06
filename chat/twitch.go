@@ -20,10 +20,12 @@ var (
 
 // Bots we know about
 func Bots() []string {
-	return []string{"nightbot", "kattah", "streamfahrer", "einfachuwe42", "aliceydra", "drapsnatt", 
-	"commanderroot", 
-	"pokemoncommunitygame", "0ax2",
-	"01ella", "own3d", "elbierro"}
+	return []string{
+		"nightbot", "kattah", "streamfahrer", "einfachuwe42", "aliceydra", "drapsnatt",
+		"commanderroot",
+		"pokemoncommunitygame", "0ax2",
+		"01ella", "own3d", "elbierro",
+	}
 }
 
 // TrimBots from a user list

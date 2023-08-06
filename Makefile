@@ -91,12 +91,12 @@ build: download build-windows build-mac
 
 build-windows: download
 	@echo building local windows 
-	@GOOS=windows GOARCH=amd64 go build -o kukorohelp.exe ./cmd/kukoro
-	@zip kukorohelp.zip kukorohelp.exe
+	@GOOS=windows GOARCH=amd64 go build -o xlgbot.exe ./cmd/xlgbot
+	@zip xlgbot.zip xlgbot.exe
 
 build-mac: download
 	@echo building local macos 
-	@GOOS=darwin GOARCH=amd64 go build -o kukorohelp-darwin ./cmd/kukoro
-	@zip kukorohelp-darwin.zip kukorohelp-darwin
+	@GOOS=darwin GOARCH=amd64 go build -o xlgbot-darwin ./cmd/xlgbot
+	@zip xlgbot-darwin.zip xlgbot-darwin
 
 all: download fmt vet lint test integration-test doc build build-windows

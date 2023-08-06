@@ -25,7 +25,7 @@ func CatchPokemon(channelName string, tw *chat.Twitch, ball string) error {
 }
 
 // IsCaught checks if a pcg check command response indicates the user has the pokemon
-func IsCaught(msg chat.TwitchMessage) (bool) {
+func IsCaught(msg chat.TwitchMessage) bool {
 	// @weberr13 Sentret registered in Pokédex: ✔
 	if msg.DisplayName() == "PokemonCommunityGame" && strings.Contains(msg.Body(), "registered in Pokédex") {
 		if strings.Contains(msg.Body(), "registered in Pokédex: ✔") {
