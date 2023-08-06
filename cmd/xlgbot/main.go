@@ -179,19 +179,43 @@ readloop:
 				return
 			}
 		case chat.JoinMessage:
+			shoutouts := map[string]string{}
 			for k, v := range msg.Users() {
+				if _, ok := knownusers[k]; !ok {
+					shoutouts[k] = v
+				} else {
+					log.Printf("existing user: %s:%s", k, v)
+				}
 				knownusers[k] = v
 			}
 			chat.TrimBots(knownusers)
+			chat.TrimBots(shoutouts)
+			for k, v := range shoutouts {
+				log.Printf("new user %s:%s joined", k, v)
+				// TODO: Get current game???
+				err := tw.SendMessage(channelName, fmt.Sprintf("Welcome %s and check them out at https://twitch.tv/%s and show them some love weberrSenaWow weberrSenaWow weberrSenaWow", k, k))
+				if err != nil {
+					log.Printf("could not auto-shoutout %s:%s", k, v)
+				}
+			}
 			users := []string{}
 			for k := range knownusers {
 				users = append(users, k)
 			}
 			log.Printf("current users: %v", users)
 		case chat.PartMessage:
-			for k := range msg.Users() {
-				log.Printf("user %s has left", k)
+			farewells := map[string]string{}
+			for k,v := range msg.Users() {
+				farewells[k] = v 
 				delete(knownusers, k)
+			}
+			chat.TrimBots(farewells)
+			for k := range farewells {
+				log.Printf("user %s has left", k)
+				err := tw.SendMessage(channelName, fmt.Sprintf("farewell %s, we will miss you!", k))
+				if err != nil {
+					log.Printf("could not say goodbye to %s", k)
+				}
 			}
 			users := []string{}
 			for k := range knownusers {

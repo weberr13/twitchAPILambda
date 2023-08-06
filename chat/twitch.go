@@ -24,7 +24,7 @@ func Bots() []string {
 		"nightbot", "kattah", "streamfahrer", "einfachuwe42", "aliceydra", "drapsnatt",
 		"commanderroot",
 		"pokemoncommunitygame", "0ax2",
-		"01ella", "own3d", "elbierro", "8hvdes",
+		"01ella", "own3d", "elbierro", "8hvdes", "7bvllet", "01olivia", "spofoh", "ahahahahhhhahahahahah",
 	}
 }
 
