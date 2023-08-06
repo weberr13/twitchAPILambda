@@ -24,8 +24,14 @@ func CatchPokemon(channelName string, tw *chat.Twitch, ball string) error {
 	return tw.SendMessage(channelName, "!pokecatch "+ball)
 }
 
+// IsRegistered response message
+func IsRegistered(msg chat.TwitchMessage) bool {
+	// @weberr13 Sentret registered in Pokédex: ✔
+	return msg.DisplayName() == "PokemonCommunityGame" && strings.Contains(msg.Body(), "registered in Pokédex")
+}
+
 // IsCaught checks if a pcg check command response indicates the user has the pokemon
-func IsCaught(msg chat.TwitchMessage) (bool) {
+func IsCaught(msg chat.TwitchMessage) bool {
 	// @weberr13 Sentret registered in Pokédex: ✔
 	if msg.DisplayName() == "PokemonCommunityGame" && strings.Contains(msg.Body(), "registered in Pokédex") {
 		if strings.Contains(msg.Body(), "registered in Pokédex: ✔") {

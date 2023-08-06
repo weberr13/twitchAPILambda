@@ -10,6 +10,10 @@ kukorohelp
 kukorohelp-darwin
 kukorohelp-darwin.zip
 kukorohelp.zip
+xlgbot
+xlgbot-darwin
+xlgbot-darwin.zip
+xlgbot.zip
 
 
 # Test binary, built with `go test -c`
