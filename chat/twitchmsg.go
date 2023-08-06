@@ -115,6 +115,7 @@ func (c *TwitchMessage) Parse(b []byte) error {
 		if len(splits) == 2 {
 			c.msg = splits[1]
 		}
+
 		return nil
 	case strings.Contains(c.raw, "twitch.tv NOTICE * :Login authentication failed"):
 		log.Printf("failed to authenticate")
@@ -327,12 +328,14 @@ func (c TwitchMessage) Type() int {
 // IsBotCommand will say if a chat message should be interpreted as a bot command
 func (c TwitchMessage) IsBotCommand() bool {
 	return strings.HasPrefix(c.msg, "!")
-	// if strings.HasPrefix(c.msg, "!") {
-	// 	log.Printf("got a bot command " + c.msg)
-	// 	return true
-	// }
-	// log.Printf("not a bot command")
-	// return false
+}
+
+// IsMod for restricted bot commands
+func (c TwitchMessage) IsMod() bool {
+	if c.preambleKV["mod"] == "1" || strings.Contains(c.preambleKV["badges"], "broadcaster/1") {
+		return true
+	}
+	return false
 }
 
 // GetBotCommand gets the command passed if IsBotCommand
