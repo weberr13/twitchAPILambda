@@ -1,9 +1,12 @@
 package chat
 
 import (
+	"crypto/rand"
 	"fmt"
 	"log"
+	"math/big"
 	"net/url"
+	"strings"
 
 	"github.com/gorilla/websocket"
 	"github.com/weberr13/twitchAPILambda/config"
@@ -16,14 +19,38 @@ var (
 	ErrNoChannel = fmt.Errorf("no channel provided")
 	// ErrNoConnection connection was not established
 	ErrNoConnection = fmt.Errorf("no connection")
+
+	// TODO: Random weighted to one or the other?
+	warewellMessages = []string{
+		"farewell %s, we will miss you! weberrSenaWave",
+		"%s left the stove on and has left the chat weberrSenaWave",
+		"bye %s, later gater weberrSenaWave",
+		"thanks for stopping by %s weberrSenaWave",
+		"adios %s weberrSenaWave",
+		"hasta la vista %s weberrSenaWave",
+	}
+	shoutoutMessages = []string{
+		"Welcome %s and check them out at https://twitch.tv/%s and show them some love weberrSenaWow weberrSenaWow weberrSenaWow",
+		"Hello %s everyone should check out their channel at https://twitch.tv/%s weberrSenaWow weberrSenaWow weberrSenaWow",
+		"Show this legend %s some love, and drop them a follow at https://twitch.tv/%s weberrSenaWow weberrSenaWow weberrSenaWow",
+		"Check this amazing streamer %s out at https://twitch.tv/%s weberrSenaWow weberrSenaWow weberrSenaWow",
+		"Please show this wonderfull streamer %s some love at https://twitch.tv/%s weberrSenaWow weberrSenaWow weberrSenaWow",
+	}
 )
+
+// AlternateUsers for a given twitch user (eg a watching account separate from the broadcasting one)
+func AlternateUsers() map[string]string {
+	return map[string]string{
+		"theradserver": "ripperzanddabs",
+	}
+}
 
 // Bots we know about
 func Bots() []string {
 	return []string{
 		"nightbot", "kattah", "streamfahrer", "einfachuwe42", "aliceydra", "drapsnatt",
 		"commanderroot",
-		"pokemoncommunitygame", "0ax2",
+		"pokemoncommunitygame", "0ax2", "arctlco", /*maybe*/
 		"01ella", "own3d", "elbierro", "8hvdes", "7bvllet", "01olivia", "spofoh", "ahahahahhhhahahahahah",
 	}
 }
@@ -32,6 +59,39 @@ func Bots() []string {
 func TrimBots(users map[string]string) {
 	for _, bot := range Bots() {
 		delete(users, bot)
+	}
+}
+
+// Shoutout a user
+func (t *Twitch) Shoutout(channelName string, user string) {
+	user = strings.TrimPrefix(user, "@")
+	iBig, err := rand.Int(rand.Reader, big.NewInt(int64(len(shoutoutMessages))))
+	messgeIndex := 0
+	if err == nil {
+		messgeIndex = int(iBig.Int64())
+	}
+	// TODO: Get current game???
+	str := fmt.Sprintf(shoutoutMessages[messgeIndex], user, user)
+	if alt, ok := AlternateUsers()[user]; ok {
+		str = fmt.Sprintf(shoutoutMessages[messgeIndex], user, alt)
+	}
+	err = t.SendMessage(channelName, str)
+	if err != nil {
+		log.Printf("could not auto-shoutout %s", user)
+	}
+}
+
+// Farewell to a user
+func (t *Twitch) Farewell(channelName string, user string) {
+	user = strings.TrimPrefix(user, "@")
+	iBig, err := rand.Int(rand.Reader, big.NewInt(int64(len(warewellMessages))))
+	messgeIndex := 0
+	if err == nil {
+		messgeIndex = int(iBig.Int64())
+	}
+	err = t.SendMessage(channelName, fmt.Sprintf(warewellMessages[messgeIndex], user))
+	if err != nil {
+		log.Printf("could not say goodbye to %s", user)
 	}
 }
 
