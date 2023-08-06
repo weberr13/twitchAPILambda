@@ -287,6 +287,28 @@ func (c TwitchMessage) String() string {
 	return fmt.Sprintf("%s: %s", c.displayname, c.msg)
 }
 
+// GoString is verbose
+func (c TwitchMessage) GoString() string {
+	s := strings.Builder{}
+	s.WriteString(fmt.Sprintf(`t: "%d"`, c.t))
+	s.WriteString(",")
+	s.WriteString(fmt.Sprintf(`raw: "%s"`, c.raw))
+	s.WriteString(",")
+	s.WriteString(fmt.Sprintf(`tags: "%s"`, c.tags))
+	s.WriteString(",")
+	s.WriteString(fmt.Sprintf(`user: "%s"`, c.user))
+	s.WriteString(",")
+	s.WriteString(fmt.Sprintf(`users: "%v"`, c.users))
+	s.WriteString(",")
+	s.WriteString(fmt.Sprintf(`msg: "%s"`, c.msg))
+	s.WriteString(",")
+	s.WriteString(fmt.Sprintf(`displayname: "%s"`, c.displayname))
+	s.WriteString(",")
+	s.WriteString(fmt.Sprintf(`preambleLV: "%v"`, c.preambleKV))
+	s.WriteString(",")
+	return s.String()
+}
+
 // DisplayName of the user who sent the message
 func (c TwitchMessage) DisplayName() string {
 	return c.displayname
@@ -305,6 +327,12 @@ func (c TwitchMessage) Type() int {
 // IsBotCommand will say if a chat message should be interpreted as a bot command
 func (c TwitchMessage) IsBotCommand() bool {
 	return strings.HasPrefix(c.msg, "!")
+	// if strings.HasPrefix(c.msg, "!") {
+	// 	log.Printf("got a bot command " + c.msg)
+	// 	return true
+	// }
+	// log.Printf("not a bot command")
+	// return false
 }
 
 // GetBotCommand gets the command passed if IsBotCommand

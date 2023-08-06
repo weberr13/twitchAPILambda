@@ -84,7 +84,7 @@ auth:
 			}
 			continue
 		}
-		log.Printf("authentication successful!")
+		log.Printf("authentication successful!!!")
 		break auth
 	}
 	defer tw.Close()
@@ -94,6 +94,11 @@ auth:
 		return
 	}
 	knownusers := map[string]string{}
+	err = tw.SendMessage(channelName, "xlg bot has joined")
+	if err != nil {
+		log.Printf("could not join channel on twitch: %s", err)
+		return
+	}
 readloop:
 	for {
 		msg, err := tw.ReceiveOneMessage()
@@ -101,15 +106,18 @@ readloop:
 			log.Printf("could not parse message %s: %s", msg.Raw(), err)
 			continue
 		}
+		log.Printf("got %s", msg.String())
 		switch msg.Type() {
 		case chat.PrivateMessage:
 			switch {
-			case pcg.IsCaught(msg):
-				user := pcg.IsCaughtUser(msg)
-				if user == "weberr13" { // the bot runs as me
-					err = pcg.CatchPokemon(channelName, tw, "ultraball")
-					if err != nil {
-						log.Printf("could not auto catch")
+			case pcg.IsRegistered(msg):
+				if !pcg.IsCaught(msg) {
+					user := pcg.IsCaughtUser(msg)
+					if user == "weberr13" { // the bot runs as me
+						err = pcg.CatchPokemon(channelName, tw, "ultraball")
+						if err != nil {
+							log.Printf("could not auto catch")
+						}
 					}
 				}
 			case pcg.IsSpawnCommand(msg):
@@ -124,6 +132,16 @@ readloop:
 				}
 			case msg.IsBotCommand():
 				switch msg.GetBotCommand() {
+				case "whois":
+					users := []string{}
+					for k := range knownusers {
+						users = append(users, k)
+					}
+					err = tw.SendMessage(channelName, fmt.Sprintf("Current users are: %v", users))
+					if err != nil {
+						log.Printf("could not send whgois %s: %s", msg.DisplayName(), err)
+					}
+					continue readloop
 				case "kukoro":
 					err = tw.SendMessage(channelName, "!getinfo "+msg.DisplayName())
 					if err != nil {
