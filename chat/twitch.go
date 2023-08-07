@@ -36,6 +36,8 @@ var (
 		"Check this amazing streamer %s out at https://twitch.tv/%s weberrSenaWow weberrSenaWow weberrSenaWow",
 		"Please show this wonderfull streamer %s some love at https://twitch.tv/%s weberrSenaWow weberrSenaWow weberrSenaWow",
 	}
+	// TwitchCharacterLimit is the maximum message size
+	TwitchCharacterLimit = 500
 )
 
 // AlternateUsers for a given twitch user (eg a watching account separate from the broadcasting one)
@@ -49,7 +51,7 @@ func AlternateUsers() map[string]string {
 func Bots() []string {
 	return []string{
 		"nightbot", "kattah", "streamfahrer", "einfachuwe42", "aliceydra", "drapsnatt",
-		"commanderroot",
+		"commanderroot", "zkeey", "lurxx",
 		"pokemoncommunitygame", "0ax2", "arctlco", /*maybe*/
 		"01ella", "own3d", "elbierro", "8hvdes", "7bvllet", "01olivia", "spofoh", "ahahahahhhhahahahahah",
 	}
@@ -220,7 +222,7 @@ func (t *Twitch) JoinChannels(channels ...string) error {
 	return nil
 }
 
-// SendMessage to a channel
+// SendMessage to a channel TODO: elipsis/fmt args pls
 func (t *Twitch) SendMessage(channelName, msg string) error {
 	if t.c == nil {
 		return ErrNoConnection

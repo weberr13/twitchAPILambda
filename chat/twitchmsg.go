@@ -332,10 +332,25 @@ func (c TwitchMessage) IsBotCommand() bool {
 
 // IsMod for restricted bot commands
 func (c TwitchMessage) IsMod() bool {
-	if c.preambleKV["mod"] == "1" || strings.Contains(c.preambleKV["badges"], "broadcaster/1") {
+	if c.preambleKV["mod"] == "1" || c.IsOwner() {
 		return true
 	}
 	return false
+}
+
+// IsOwner is the channel owner/broadcaster
+func (c TwitchMessage) IsOwner() bool {
+	return strings.Contains(c.preambleKV["badges"], "broadcaster/1")
+}
+
+// IsSub is a subscriber
+func (c TwitchMessage) IsSub() bool {
+	return c.preambleKV["subscriber"] == "1" || c.IsOwner()
+}
+
+// IsVIP are VIPs
+func (c TwitchMessage) IsVIP() bool {
+	return c.preambleKV["vip"] == "1" || c.IsOwner()
 }
 
 // GetBotCommand gets the command passed if IsBotCommand
