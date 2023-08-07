@@ -35,6 +35,20 @@ var LevelAsNumber = map[string]int{
 	"everyone":   5,
 }
 
+// DiscordBotConfig configures a registered discord bot
+type DiscordBotConfig struct {
+	ApplicationID string   `json:"applicationID"`
+	PublicKey     string   `json:"publicKey"`
+	Token         string   `json:"token"`
+	Channels      []string `json:"channels"`
+}
+
+// TwitchConfig params that allow a twitch bot to run
+type TwitchConfig struct {
+	ChannelName string `json:"channelName"`
+	ChannelID   string `json:"channelID"`
+}
+
 // Configuration embedded at build time
 type Configuration struct {
 	ClientSecret       string            `json:"clientSecret"`
@@ -45,6 +59,8 @@ type Configuration struct {
 	RedirectURL        string            `json:"redirect"`
 	SignSecret         string            `json:"signSecret"`
 	AuthorizedChannels map[string]string `json:"authorizedChannels"`
+	Discord            *DiscordBotConfig `json:"discord,omitempty"`
+	Twitch             TwitchConfig      `json:"twitch"`
 }
 
 // TokenResponse contains the server side cached token
