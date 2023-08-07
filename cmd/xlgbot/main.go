@@ -10,6 +10,7 @@ import (
 	"github.com/weberr13/twitchAPILambda/autochat"
 	"github.com/weberr13/twitchAPILambda/chat"
 	"github.com/weberr13/twitchAPILambda/config"
+	"github.com/weberr13/twitchAPILambda/discord"
 	"github.com/weberr13/twitchAPILambda/kukoro"
 	"github.com/weberr13/twitchAPILambda/pcg"
 )
@@ -28,6 +29,12 @@ func main() {
 	flag.StringVar(&channelName, "channelName", "", "your twitch channel name")
 	flag.StringVar(&channelID, "channelID", "", "your twitch channel ID")
 	flag.Parse()
+	if ourConfig.Twitch.ChannelName != "" {
+		channelName = ourConfig.Twitch.ChannelName
+	}
+	if ourConfig.Twitch.ChannelID != "" {
+		channelID = ourConfig.Twitch.ChannelID
+	}
 	if channelName == "" {
 		log.Fatal("please specify channel name to join")
 	}
@@ -54,6 +61,15 @@ func main() {
 		log.Printf("could not set chat ops: %s", err)
 		tw.Close()
 		return
+	}
+	discordBot, err := discord.NewBot(*ourConfig.Discord)
+	if err != nil {
+		log.Printf("not starting discord bot: %s", err)
+	} else {
+		err := discordBot.BroadcastMessage(ourConfig.Discord.Channels, fmt.Sprintf("xlg discord bot has started for %s", channelName))
+		if err != nil {
+			log.Printf("could not send discord test message: %s", err)
+		}
 	}
 auth:
 	for {
@@ -128,6 +144,12 @@ readloop:
 				err = pcg.CheckPokemon(channelName, tw)
 				if err != nil {
 					log.Printf("could not check pokemon %s", msg.Body())
+				}
+				if discordBot != nil {
+					err := discordBot.BroadcastMessage(ourConfig.Discord.Channels, fmt.Sprintf("a pokemon has spawned in %s, go to https://twitch.tv/%s to catch it: %s", channelName, channelName, msg.Body()))
+					if err != nil {
+						log.Printf("could not post pokemon spawn: %s", err)
+					}
 				}
 			case msg.User() == "weberr13":
 				if kukoro.IsKukoroMsg(msg) {
