@@ -37,10 +37,12 @@ var LevelAsNumber = map[string]int{
 
 // DiscordBotConfig configures a registered discord bot
 type DiscordBotConfig struct {
-	ApplicationID string   `json:"applicationID"`
-	PublicKey     string   `json:"publicKey"`
-	Token         string   `json:"token"`
-	Channels      []string `json:"channels"`
+	ApplicationID     string   `json:"applicationID"`
+	PublicKey         string   `json:"publicKey"`
+	Token             string   `json:"token"`
+	BroadcastChannels []string `json:"broadcastChannels"`
+	ReplyChannels     []string `json:"replyChannels"`
+	LogChannels       []string `json:"logChannels"`
 }
 
 // TwitchConfig params that allow a twitch bot to run
