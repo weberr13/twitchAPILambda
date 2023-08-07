@@ -62,11 +62,13 @@ func main() {
 		tw.Close()
 		return
 	}
-	discordBot, err := discord.NewBot(*ourConfig.Discord)
+	autoChatter := autochat.NewOpenAI(ourConfig.OpenAIKey)
+	discordBot, err := discord.NewBot(*ourConfig.Discord, autoChatter)
 	if err != nil {
 		log.Printf("not starting discord bot: %s", err)
 	} else {
-		err := discordBot.BroadcastMessage(ourConfig.Discord.Channels, fmt.Sprintf("xlg discord bot has started for %s", channelName))
+		defer discordBot.Close()
+		err := discordBot.BroadcastMessage(ourConfig.Discord.LogChannels, fmt.Sprintf("xlg discord bot has started for %s", channelName))
 		if err != nil {
 			log.Printf("could not send discord test message: %s", err)
 		}
@@ -118,7 +120,6 @@ auth:
 		log.Printf("could not join channel on twitch: %s", err)
 		return
 	}
-	autoChatter := autochat.NewOpenAI(ourConfig.OpenAIKey)
 readloop:
 	for {
 		msg, err := tw.ReceiveOneMessage()
@@ -146,7 +147,7 @@ readloop:
 					log.Printf("could not check pokemon %s", msg.Body())
 				}
 				if discordBot != nil {
-					err := discordBot.BroadcastMessage(ourConfig.Discord.Channels, fmt.Sprintf("a pokemon has spawned in %s, go to https://twitch.tv/%s to catch it: %s", channelName, channelName, msg.Body()))
+					err := discordBot.BroadcastMessage(ourConfig.Discord.BroadcastChannels, fmt.Sprintf("a pokemon has spawned in %s, go to https://twitch.tv/%s to catch it: %s", channelName, channelName, msg.Body()))
 					if err != nil {
 						log.Printf("could not post pokemon spawn: %s", err)
 					}
