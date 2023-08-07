@@ -40,6 +40,7 @@ type Configuration struct {
 	ClientSecret       string            `json:"clientSecret"`
 	ClientID           string            `json:"clientID"`
 	OurURL             string            `json:"ourURL"`
+	OpenAIKey          string            `json:"openAIKey"`
 	TableName          string            `json:"tableName"`
 	RedirectURL        string            `json:"redirect"`
 	SignSecret         string            `json:"signSecret"`
@@ -158,7 +159,7 @@ func (c Configuration) GetAuthTokenResponse(channelID, channelName string) (*Tok
 		if err != nil {
 			return nil
 		}
-		fmt.Printf("got: %s", string(b))
+		// fmt.Printf("got: %s", string(b))
 		tr := TokenResponse{}
 		err = json.Unmarshal(b, &tr)
 		if err != nil {

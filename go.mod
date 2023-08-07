@@ -11,6 +11,7 @@ require (
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/gorilla/websocket v1.5.0
 	github.com/morelj/lambada v0.1.3
+	github.com/sashabaranov/go-openai v1.14.1
 	golang.org/x/oauth2 v0.4.0
 )
 

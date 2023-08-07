@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
+	"time"
 
+	"github.com/weberr13/twitchAPILambda/autochat"
 	"github.com/weberr13/twitchAPILambda/chat"
 	"github.com/weberr13/twitchAPILambda/config"
 	"github.com/weberr13/twitchAPILambda/kukoro"
@@ -99,6 +102,7 @@ auth:
 		log.Printf("could not join channel on twitch: %s", err)
 		return
 	}
+	autoChatter := autochat.NewOpenAI(ourConfig.OpenAIKey)
 readloop:
 	for {
 		msg, err := tw.ReceiveOneMessage()
@@ -132,6 +136,42 @@ readloop:
 				}
 			case msg.IsBotCommand():
 				switch msg.GetBotCommand() {
+				case "ask":
+					if msg.IsMod() || msg.IsSub() || msg.IsVIP() {
+						func() {
+							_ = tw.SendMessage(channelName, "The oracle has heard your question, please wait...")
+							ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+							defer cancel()
+							resp, err := autoChatter.CreateCompletion(ctx, msg.GetBotCommandArgs())
+							if err != nil {
+								log.Printf("openai failed: %s", err)
+								_ = tw.SendMessage(channelName, "I cannot answer that right now, Dave")
+								return
+							}
+							preamble := "The oracle has concluded that: "
+							if len(resp) > chat.TwitchCharacterLimit-len(preamble) {
+								for len(resp) > chat.TwitchCharacterLimit-len(preamble) {
+									err = tw.SendMessage(channelName, fmt.Sprintf("%s%s", preamble, resp[0:chat.TwitchCharacterLimit-len(preamble)]))
+									if err != nil {
+										log.Printf("failed to send chat response: %s", err)
+										_ = tw.SendMessage(channelName, "Something has gone terribly wrong, check logs for details")
+										return
+									}
+									resp = resp[chat.TwitchCharacterLimit-len(preamble):]
+									preamble = "cont: "
+								}
+							}
+							err = tw.SendMessage(channelName, fmt.Sprintf("%s%s", preamble, resp))
+							if err != nil {
+								log.Printf("failed to send chat response: %s", err)
+								_ = tw.SendMessage(channelName, "Something has gone terribly wrong, check logs for details")
+								return
+							}
+						}()
+					} else {
+						log.Printf("got ask command from %s", msg.GoString())
+					}
+					continue readloop
 				case "bye":
 					if msg.IsMod() {
 						tw.Farewell(channelName, msg.GetBotCommandArgs())
@@ -143,30 +183,36 @@ readloop:
 					if msg.IsMod() {
 						tw.Shoutout(channelName, msg.GetBotCommandArgs())
 					} else {
-						log.Printf("got bye command from %s", msg.GoString())
+						log.Printf("got so command from %s", msg.GoString())
 					}
 					continue readloop
 				case "raidmsg":
-					// TODO: put this in config?
-					err = tw.SendMessage(channelName, "Weberr13 RAID weberrMioRaid weberrMioRaid weberrMioRaid")
-					if err != nil {
-						log.Printf("could not send raid message %s: %s", msg.DisplayName(), err)
+					if msg.IsMod() || msg.IsSub() || msg.IsVIP() {
+						// TODO: put this in config?
+						err = tw.SendMessage(channelName, "Weberr13 RAID weberrMioRaid weberrMioRaid weberrMioRaid")
+						if err != nil {
+							log.Printf("could not send raid message %s: %s", msg.DisplayName(), err)
+						}
 					}
 					continue readloop
 				case "subraid":
-					err = tw.SendMessage(channelName, "Weberr13 RAID weberrMioRaid weberrMioCheer weberrMioRaid")
-					if err != nil {
-						log.Printf("could not send raid message %s: %s", msg.DisplayName(), err)
+					if msg.IsMod() || msg.IsSub() || msg.IsVIP() {
+						err = tw.SendMessage(channelName, "Weberr13 RAID weberrMioRaid weberrMioCheer weberrMioRaid")
+						if err != nil {
+							log.Printf("could not send raid message %s: %s", msg.DisplayName(), err)
+						}
 					}
 					continue readloop
 				case "whois":
-					users := []string{}
-					for k := range knownusers {
-						users = append(users, k)
-					}
-					err = tw.SendMessage(channelName, fmt.Sprintf("Current users are: %v", users))
-					if err != nil {
-						log.Printf("could not send whgois %s: %s", msg.DisplayName(), err)
+					if msg.IsMod() {
+						users := []string{}
+						for k := range knownusers {
+							users = append(users, k)
+						}
+						err = tw.SendMessage(channelName, fmt.Sprintf("Current users are: %v", users))
+						if err != nil {
+							log.Printf("could not send whgois %s: %s", msg.DisplayName(), err)
+						}
 					}
 					continue readloop
 				case "kukoro":
