@@ -51,8 +51,8 @@ func AlternateUsers() map[string]string {
 func Bots() []string {
 	return []string{
 		"nightbot", "kattah", "streamfahrer", "einfachuwe42", "aliceydra", "drapsnatt",
-		"commanderroot", "zkeey", "lurxx",
-		"pokemoncommunitygame", "0ax2", "arctlco", /*maybe*/
+		"commanderroot", "zkeey", "lurxx", "fwost", 
+		"pokemoncommunitygame", "0ax2", "arctlco", /*maybe*/ "anotherttvviewer",
 		"01ella", "own3d", "elbierro", "8hvdes", "7bvllet", "01olivia", "spofoh", "ahahahahhhhahahahahah",
 	}
 }
