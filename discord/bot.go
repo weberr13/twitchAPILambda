@@ -18,7 +18,7 @@ var (
 	commands = []*discordgo.ApplicationCommand{
 		{
 			Name:        "ask",
-			Description: "Ask me something",			
+			Description: "Ask me something",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -27,7 +27,6 @@ var (
 					Required:    true,
 				},
 			},
-
 		},
 	}
 
@@ -46,7 +45,7 @@ func (bc *BotClient) AskCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		for _, opt := range options {
 			optionMap[opt.Name] = opt
 		}
-		resp, err := bc.chat.CreateCompletion(ctx,optionMap["question"].StringValue())
+		resp, err := bc.chat.CreateCompletion(ctx, optionMap["question"].StringValue())
 		if err != nil {
 			log.Printf("openai failed: %s", err)
 			respC <- "I cannot answer that right now, Dave"
@@ -54,10 +53,9 @@ func (bc *BotClient) AskCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		}
 		content := fmt.Sprintf(`The oracle has concluded that the answer to "%s" is :%s`, optionMap["question"].StringValue(), resp)
 		respC <- content
-		
 	}()
 	select {
-	case <-time.After(2500*time.Millisecond):
+	case <-time.After(2500 * time.Millisecond):
 		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -67,7 +65,7 @@ func (bc *BotClient) AskCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		if err != nil {
 			log.Printf("failed to send message: %s", err)
 		}
-		content := <- respC
+		content := <-respC
 		err = bc.SendMessage(i.ChannelID, content)
 		if err != nil {
 			log.Printf("failed to send message: %s", err)
@@ -122,7 +120,7 @@ func NewBot(conf config.DiscordBotConfig, autochater AutoChatterer) (*BotClient,
 		if h, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
 			h(s, i)
 		} else {
-			log.Printf("unknownd command %s", i.ApplicationCommandData().Name )
+			log.Printf("unknownd command %s", i.ApplicationCommandData().Name)
 		}
 	})
 	err = bc.client.Open()
