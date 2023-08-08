@@ -204,7 +204,7 @@ readloop:
 					continue readloop
 				case "so":
 					if msg.IsMod() {
-						tw.Shoutout(channelName, msg.GetBotCommandArgs())
+						tw.Shoutout(channelName, msg.GetBotCommandArgs(), true)
 					} else {
 						log.Printf("got so command from %s", msg.GoString())
 					}
@@ -288,7 +288,7 @@ readloop:
 			chat.TrimBots(shoutouts)
 			for k, v := range shoutouts {
 				log.Printf("new user %s:%s joined", k, v)
-				tw.Shoutout(channelName, k)
+				tw.Shoutout(channelName, k, false)
 			}
 			users := []string{}
 			for k := range knownusers {
