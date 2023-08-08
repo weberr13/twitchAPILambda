@@ -2,11 +2,15 @@ package chat
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
+	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/weberr13/twitchAPILambda/config"
@@ -29,12 +33,15 @@ var (
 		"adios %s weberrSenaWave",
 		"hasta la vista %s weberrSenaWave",
 	}
+	// TODO:
+	// Add 18+ or even 21+ depending on the content classification data we get back
+	// ContentClassificationLabels: "DrugsIntoxication", "ProfanityVulgarity", "ViolentGraphic"
 	shoutoutMessages = []string{
-		"Welcome %s and check them out at https://twitch.tv/%s and show them some love weberrSenaWow weberrSenaWow weberrSenaWow",
-		"Hello %s everyone should check out their channel at https://twitch.tv/%s weberrSenaWow weberrSenaWow weberrSenaWow",
-		"Show this legend %s some love, and drop them a follow at https://twitch.tv/%s weberrSenaWow weberrSenaWow weberrSenaWow",
-		"Check this amazing streamer %s out at https://twitch.tv/%s weberrSenaWow weberrSenaWow weberrSenaWow",
-		"Please show this wonderfull streamer %s some love at https://twitch.tv/%s weberrSenaWow weberrSenaWow weberrSenaWow",
+		`Welcome %s and check them out at https://twitch.tv/%s they were last playing "%s" and show them some love weberrSenaWow weberrSenaWow weberrSenaWow`,
+		`Hello %s everyone should check out their channel at https://twitch.tv/%s they were last playing "%s" weberrSenaWow weberrSenaWow weberrSenaWow`,
+		`Show this legend %s some love, and drop them a follow at https://twitch.tv/%s they were last playing "%s" weberrSenaWow weberrSenaWow weberrSenaWow`,
+		`Check this amazing streamer %s out at https://twitch.tv/%s they were last playing "%s" weberrSenaWow weberrSenaWow weberrSenaWow`,
+		`Please show this wonderfull streamer %s some love at https://twitch.tv/%s they were last playing "%s" weberrSenaWow weberrSenaWow weberrSenaWow`,
 	}
 	// TwitchCharacterLimit is the maximum message size
 	TwitchCharacterLimit = 500
@@ -51,7 +58,7 @@ func AlternateUsers() map[string]string {
 func Bots() []string {
 	return []string{
 		"nightbot", "kattah", "streamfahrer", "einfachuwe42", "aliceydra", "drapsnatt",
-		"commanderroot", "zkeey", "lurxx", "fwost", "implium",
+		"commanderroot", "zkeey", "lurxx", "fwost", "implium", "vlmercy",
 		"pokemoncommunitygame", "0ax2", "arctlco" /*maybe*/, "anotherttvviewer",
 		"01ella", "own3d", "elbierro", "8hvdes", "7bvllet", "01olivia", "spofoh", "ahahahahhhhahahahahah",
 	}
@@ -65,18 +72,49 @@ func TrimBots(users map[string]string) {
 }
 
 // Shoutout a user
-func (t *Twitch) Shoutout(channelName string, user string) {
+func (t *Twitch) Shoutout(channelName string, user string, manual bool) {
 	user = strings.TrimPrefix(user, "@")
+	user = strings.ToLower(user)
+	alt := user
+	if a, ok := AlternateUsers()[user]; ok {
+		alt = a
+	}
+
+	userInfo, err := t.GetUserInfo(alt)
+	if err != nil {
+		log.Printf("could not get user info, not doing a shoutout: %s", err)
+		return
+	}
+	// log.Printf("%#v", userInfo)
+	chanInfo, err := t.GetChannelInfo(userInfo)
+	if err != nil {
+		log.Printf("could not get channel info, not doing a shoutout: %s", err)
+		return
+	}
+	if chanInfo.GameName == "" || chanInfo.GameName == "<none>" {
+		log.Printf("not shouting out user as they don't stream")
+		return
+	}
+	followed, err := t.IFollowThem(userInfo.ID)
+	if err != nil {
+		log.Printf("something whent wrong getting follow info: %s", err)
+		return
+	}
+	if !followed && !manual {
+		log.Printf("no auto shoutout for: %#v", chanInfo)
+		return
+	}
+	if !followed && manual {
+		log.Printf("I don't follow %#v %#v but shouting out regardless", userInfo, chanInfo)
+	}
 	iBig, err := rand.Int(rand.Reader, big.NewInt(int64(len(shoutoutMessages))))
 	messgeIndex := 0
 	if err == nil {
 		messgeIndex = int(iBig.Int64())
 	}
-	// TODO: Get current game???
-	str := fmt.Sprintf(shoutoutMessages[messgeIndex], user, user)
-	if alt, ok := AlternateUsers()[user]; ok {
-		str = fmt.Sprintf(shoutoutMessages[messgeIndex], user, alt)
-	}
+	// TODO: Text Parsing {{.etc}}
+	str := fmt.Sprintf(shoutoutMessages[messgeIndex], user, alt, chanInfo.GameName)
+
 	err = t.SendMessage(channelName, str)
 	if err != nil {
 		log.Printf("could not auto-shoutout %s", user)
@@ -99,7 +137,10 @@ func (t *Twitch) Farewell(channelName string, user string) {
 
 // Twitch talks to twitch
 type Twitch struct {
-	c *websocket.Conn
+	c            *websocket.Conn
+	cfg          *config.Configuration
+	token        string
+	hostUserInfo *TwitchUserInfo
 }
 
 // NewTwitch chat interface
@@ -109,7 +150,166 @@ func NewTwitch(cfg *config.Configuration) (*Twitch, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Twitch{c: c}, nil
+	return &Twitch{c: c, cfg: cfg}, nil
+}
+
+// TwitchUserInfo response from GetUser
+// https://dev.twitch.tv/docs/api/reference/#get-users
+type TwitchUserInfo struct {
+	ID              string    `json:"id"`
+	Login           string    `json:"login"`
+	DisplayName     string    `json:"display_name"`
+	Type            string    `json:"type"`
+	BroadcasterType string    `json:"broadcaster_type"`
+	Description     string    `json:"description"`
+	ProfileImageURL string    `json:"profile_image_url"`
+	OffilneImageURL string    `json:"offline_image_url"`
+	ViewCount       int       `json:"view_count"`
+	Email           string    `json:"email"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// TwitchChannelInfo contains the information about a channel
+type TwitchChannelInfo struct {
+	BroadcasterID              string   `json:"broadcaster_id"`
+	BroadcasterLogin           string   `json:"broadcaster_login"`
+	BroadcasterName            string   `json:"broadcaster_name"`
+	BroadcasterLanguage        string   `json:"broadcaster_language"`
+	GameID                     string   `json:"game_id"`
+	GameName                   string   `json:"game_name"`
+	Title                      string   `json:"title"`
+	Delay                      int      `json:"delay"`
+	Taghs                      []string `json:"tags"`
+	ContentClassificatinLables []string `json:"content_classification_labels"`
+	ISBrandedContent           bool     `json:"is_branded_content"`
+}
+
+// {
+// 	"broadcaster_id": "141981764",
+// 	"broadcaster_login": "twitchdev",
+// 	"broadcaster_name": "TwitchDev",
+// 	"broadcaster_language": "en",
+// 	"game_id": "509670",
+// 	"game_name": "Science & Technology",
+// 	"title": "TwitchDev Monthly Update // May 6, 2021",
+// 	"delay": 0,
+// 	"tags": ["DevsInTheKnow"],
+// 	"content_classification_labels": ["Gambling", "DrugsIntoxication", "MatureGame"],
+// 	"is_branded_content": false
+//   }
+
+// GetUserInfo gets the information on a user by login
+func (t *Twitch) GetUserInfo(login string) (*TwitchUserInfo, error) {
+	req, err := http.NewRequest(http.MethodGet, "https://api.twitch.tv/helix/users?login="+login, nil)
+	if err != nil {
+		return nil, fmt.Errorf("cannot make request: %w", err)
+	}
+	t.cfg.SetAuthorization(req, t.token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cannot do request: %w", err)
+	}
+	if res.Body != nil {
+		defer res.Body.Close()
+	}
+	if res.StatusCode > http.StatusMultipleChoices {
+		return nil, fmt.Errorf("got back %d on get users command", res.StatusCode)
+	}
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	type respData struct {
+		Data []*TwitchUserInfo `json:"data"`
+	}
+	userInfo := &respData{}
+	err = json.Unmarshal(b, userInfo)
+	if err != nil {
+		return nil, err
+	}
+	if len(userInfo.Data) > 0 {
+		return userInfo.Data[0], nil
+	}
+	return nil, fmt.Errorf("user %s not found", login)
+}
+
+// GetChannelInfo gets channel information
+func (t *Twitch) GetChannelInfo(userInfo *TwitchUserInfo) (*TwitchChannelInfo, error) {
+	if userInfo == nil || userInfo.ID == "" {
+		return nil, fmt.Errorf("no user specified")
+	}
+	req, err := http.NewRequest(http.MethodGet, "https://api.twitch.tv/helix/channels?broadcaster_id="+userInfo.ID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("cannot make request: %w", err)
+	}
+	t.cfg.SetAuthorization(req, t.token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cannot do request: %w", err)
+	}
+	if res.Body != nil {
+		defer res.Body.Close()
+	}
+	if res.StatusCode > http.StatusMultipleChoices {
+		return nil, fmt.Errorf("got back %d on get users command", res.StatusCode)
+	}
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	type respData struct {
+		Data []*TwitchChannelInfo `json:"data"`
+	}
+	chanInfo := &respData{}
+	err = json.Unmarshal(b, chanInfo)
+	if err != nil {
+		return nil, err
+	}
+	if len(chanInfo.Data) > 0 {
+		return chanInfo.Data[0], nil
+	}
+	return nil, fmt.Errorf("user %#v not found", userInfo)
+}
+
+// IFollowThem checks if a channel is followed by the channel running the bot, used by auto-shoutout
+// https://dev.twitch.tv/docs/api/reference/#get-followed-channels
+func (t *Twitch) IFollowThem(theirID string) (bool, error) {
+	if t.hostUserInfo == nil {
+		hostUserInfo, err := t.GetUserInfo(t.cfg.Twitch.ChannelName)
+		if err != nil {
+			return false, err
+		}
+		t.hostUserInfo = hostUserInfo
+	}
+	req, err := http.NewRequest(http.MethodGet, "https://api.twitch.tv/helix/channels/followed?user_id="+t.hostUserInfo.ID+"&broadcaster_id="+theirID, nil)
+	if err != nil {
+		return false, fmt.Errorf("cannot make request: %w", err)
+	}
+	t.cfg.SetAuthorization(req, t.token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("cannot do request: %w", err)
+	}
+	if res.Body != nil {
+		defer res.Body.Close()
+	}
+	if res.StatusCode > http.StatusMultipleChoices {
+		return false, fmt.Errorf("got back %d on get users command", res.StatusCode)
+	}
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		return false, err
+	}
+	type respData struct {
+		Total int                      `json:"total"`
+		Data  []map[string]interface{} `json:"data"` // TODO: do we want this to be the real thing?
+	}
+	followInfo := &respData{}
+	err = json.Unmarshal(b, followInfo)
+	if err != nil {
+		return false, err
+	}
+	return len(followInfo.Data) > 0, nil
 }
 
 // Close will idempotently close the underlying websocket
@@ -183,6 +383,7 @@ func (t *Twitch) Authenticate(name, token string) error {
 	} else {
 		return ErrAuthFailed
 	}
+	t.token = token
 	return nil
 }
 

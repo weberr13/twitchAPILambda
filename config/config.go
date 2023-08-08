@@ -20,7 +20,7 @@ var configBytes []byte
 
 var (
 	clipScope = []string{"clips:edit"}
-	chatScope = []string{"chat:edit", "chat:read"}
+	chatScope = []string{"chat:edit", "chat:read", "user:read:follows"}
 	// ErrNeedAuthorization is returned because we need to restart after auth is created
 	ErrNeedAuthorization = fmt.Errorf("user needs to authorize the app")
 )
