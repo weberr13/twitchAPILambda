@@ -7,9 +7,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/twitch"
@@ -20,7 +22,7 @@ var configBytes []byte
 
 var (
 	clipScope = []string{"clips:edit"}
-	chatScope = []string{"chat:edit", "chat:read", "user:read:follows"}
+	chatScope = []string{"clips:edit", "chat:edit", "chat:read", "user:read:follows"}
 	// ErrNeedAuthorization is returned because we need to restart after auth is created
 	ErrNeedAuthorization = fmt.Errorf("user needs to authorize the app")
 )
@@ -47,8 +49,27 @@ type DiscordBotConfig struct {
 
 // TwitchConfig params that allow a twitch bot to run
 type TwitchConfig struct {
-	ChannelName string `json:"channelName"`
-	ChannelID   string `json:"channelID"`
+	ChannelName string                 `json:"channelName"`
+	ChannelID   string                 `json:"channelID"`
+	YouTube     string                 `json:"youtube"`
+	Socials     []string               `json:"socials"`
+	Timers      map[string]TimerConfig `json:"timers"`
+}
+
+// TimerConfig configures a timer
+type TimerConfig struct {
+	WaitTime string `json:"waittime"`
+	Message  string `json:"message"`
+	Alias    string `json:"alias"`
+}
+
+// WaitFor returns a parsed wait time or the minumum time of 5seconds
+func (t TimerConfig) WaitFor() time.Duration {
+	d, err := time.ParseDuration(t.WaitTime)
+	if err != nil || d < 5*time.Second {
+		return 5 * time.Second
+	}
+	return d
 }
 
 // Configuration embedded at build time
@@ -129,6 +150,69 @@ func NewConfig() *Configuration {
 		if ToNum(level) > 4 {
 			ourConfig.AuthorizedChannels[id] = "owner"
 			log.Printf("overriding user level to owner for %s, must be at least a regular to use the commands", id)
+		}
+	}
+	if ourConfig.Twitch.Timers == nil {
+		ourConfig.Twitch.Timers = map[string]TimerConfig{
+			"xlg": {
+				WaitTime: "30m",
+				Message:  "Join the XLG gaming community at https://discord.gg/xlg",
+			},
+		}
+	}
+	// TODO: command line arg to find config file?
+	localCfg, err := os.Open("local.cfg")
+	if err == nil {
+		b, err := io.ReadAll(localCfg)
+		if err == nil {
+			localConfig := &Configuration{}
+			err = json.Unmarshal(b, localConfig)
+			if err == nil {
+				// if localConfig.ClientID != "" {
+				// 	ourConfig.ClientID = localConfig.ClientID
+				// }
+				// if localConfig.ClientSecret != "" {
+				// 	ourConfig.ClientSecret = localConfig.ClientSecret
+				// }
+				// if localConfig.OurURL != "" {
+				// 	ourConfig.OurURL = localConfig.OurURL
+				// }
+				// if localConfig.OpenAIKey != "" {
+				// 	ourConfig.OpenAIKey = localConfig.OpenAIKey
+				// }
+				// if localConfig.TableName != "" {
+				// 	ourConfig.TableName = localConfig.TableName
+				// }
+				// if localConfig.RedirectURL != "" {
+				// 	ourConfig.RedirectURL = localConfig.RedirectURL
+				// }
+				// if localConfig.SignSecret != "" {
+				// 	ourConfig.SignSecret = localConfig.SignSecret
+				// }
+				// This is server side only:
+				// AuthorizedChannels map[string]string `json:"authorizedChannels"`
+				// This is for the author only
+				// Discord            *DiscordBotConfig `json:"discord,omitempty"`
+				if localConfig.Twitch.ChannelID != "" {
+					ourConfig.Twitch.ChannelID = localConfig.Twitch.ChannelID
+				}
+				if localConfig.Twitch.ChannelName != "" {
+					ourConfig.Twitch.ChannelName = localConfig.Twitch.ChannelName
+				}
+				if localConfig.Twitch.YouTube != "" {
+					ourConfig.Twitch.YouTube = localConfig.Twitch.YouTube
+				}
+				if len(localConfig.Twitch.Socials) > 0 {
+					ourConfig.Twitch.Socials = localConfig.Twitch.Socials
+				}
+				if len(localConfig.Twitch.Timers) > 0 {
+					for k, v := range localConfig.Twitch.Timers {
+						ourConfig.Twitch.Timers[k] = v
+					}
+				}
+			} else {
+				panic(err)
+			}
 		}
 	}
 	return ourConfig

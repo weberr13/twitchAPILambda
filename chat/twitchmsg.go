@@ -46,6 +46,16 @@ type TwitchMessage struct {
 	preambleKV  map[string]string
 }
 
+// FakeTwitchMessage for timers/etc
+func FakeTwitchMessage(body string) TwitchMessage {
+	return TwitchMessage{
+		msg: body,
+		preambleKV: map[string]string{
+			"badges": "broadcaster/1",
+		},
+	}
+}
+
 // TODO parse the preambles into a map since it is all k=v
 
 func (c *TwitchMessage) parsePreamble() {

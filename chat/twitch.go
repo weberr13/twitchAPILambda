@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -10,10 +11,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/weberr13/twitchAPILambda/config"
+	twitchapi "github.com/weberr13/twitchAPILambda/twitch"
 )
 
 var (
@@ -65,8 +68,8 @@ func AlternateUsers() map[string]string {
 func Bots() []string {
 	return []string{
 		"nightbot", "kattah", "streamfahrer", "einfachuwe42", "aliceydra", "drapsnatt",
-		"commanderroot", "zkeey", "lurxx", "fwost", "implium", "vlmercy",
-		"pokemoncommunitygame", "0ax2", "arctlco" /*maybe*/, "anotherttvviewer",
+		"commanderroot", "zkeey", "lurxx", "fwost", "implium", "vlmercy", "rogueg1rl",
+		"pokemoncommunitygame", "0ax2", "arctlco" /*maybe*/, "anotherttvviewer", "morgane2k7", "01aaliyah",
 		"01ella", "own3d", "elbierro", "8hvdes", "7bvllet", "01olivia", "spofoh", "ahahahahhhhahahahahah",
 	}
 }
@@ -85,6 +88,52 @@ func randIndex[T any](array []T) int {
 		messgeIndex = int(iBig.Int64())
 	}
 	return messgeIndex
+}
+
+// Clip the latest few seconds
+// nightbot : $(urlfetch https://m7tthg2fz8.execute-api.us-east-1.amazonaws.com/?cmd=clip)
+func (t *Twitch) Clip() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("https://api.twitch.tv/helix/clips?broadcaster_id=%s", t.cfg.Twitch.ChannelID), nil)
+	if err != nil {
+		return "", err
+	}
+	t.cfg.SetAuthorization(req, t.token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return "", fmt.Errorf("not authorized?")
+	}
+	m := twitchapi.CreateClipResponse{}
+	b, _ := io.ReadAll(resp.Body)
+	err = json.Unmarshal(b, &m)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode >= http.StatusMultiStatus {
+		m2 := twitchapi.APIError{}
+		err = json.Unmarshal(b, &m2)
+		if err != nil {
+			return "", err
+		}
+		return "", fmt.Errorf("something went wrong: %s", m2.Message)
+	}
+	r := ""
+	for _, d := range m.Data {
+		if d.EditURL != "" {
+			r += fmt.Sprintf("successfully created clip with id:%s and url:%s. Use the URL to adjust timing and duration.", d.ID, d.EditURL)
+		}
+	}
+	if r != "" {
+		return r, nil
+	}
+
+	return "", fmt.Errorf("unexpected response from TwitchAPI: %s", string(b))
 }
 
 // Shoutout a user
@@ -107,6 +156,7 @@ func (t *Twitch) Shoutout(channelName string, user string, manual bool) {
 		log.Printf("could not get channel info, not doing a shoutout: %s", err)
 		return
 	}
+	log.Printf("*** channel info %#v", chanInfo)
 	if chanInfo.GameName == "" || chanInfo.GameName == "<none>" {
 		log.Printf("not shouting out user as they don't stream")
 		return
@@ -166,6 +216,7 @@ type Twitch struct {
 	cfg          *config.Configuration
 	token        string
 	hostUserInfo *TwitchUserInfo
+	sync.Mutex
 }
 
 // NewTwitch chat interface
@@ -325,6 +376,8 @@ func (t *Twitch) IFollowThem(theirID string) (bool, error) {
 
 // Close will idempotently close the underlying websocket
 func (t *Twitch) Close() error {
+	t.Lock()
+	defer t.Unlock()
 	var err error
 	if t.c != nil {
 		err = t.c.Close()
@@ -335,6 +388,8 @@ func (t *Twitch) Close() error {
 
 // SetChatOps configures the chat session for twitch streams
 func (t *Twitch) SetChatOps() error {
+	t.Lock()
+	defer t.Unlock()
 	if t.c == nil {
 		return ErrNoConnection
 	}
@@ -360,6 +415,8 @@ func (t *Twitch) SetChatOps() error {
 
 // Authenticate to twitch for the bot name with the given auth token
 func (t *Twitch) Authenticate(name, token string) error {
+	t.Lock()
+	defer t.Unlock()
 	if t.c == nil {
 		return ErrNoConnection
 	}
@@ -400,6 +457,8 @@ func (t *Twitch) Authenticate(name, token string) error {
 
 // JoinChannels on an authenticated session
 func (t *Twitch) JoinChannels(channels ...string) error {
+	t.Lock()
+	defer t.Unlock()
 	if t.c == nil {
 		return ErrNoConnection
 	}
@@ -436,6 +495,8 @@ func (t *Twitch) JoinChannels(channels ...string) error {
 
 // SendMessage to a channel TODO: elipsis/fmt args pls
 func (t *Twitch) SendMessage(channelName, msg string) error {
+	t.Lock()
+	defer t.Unlock()
 	if t.c == nil {
 		return ErrNoConnection
 	}
@@ -461,6 +522,8 @@ func (t *Twitch) SendMessage(channelName, msg string) error {
 
 // ReceiveOneMessage waits for a message to be posted to chat
 func (t *Twitch) ReceiveOneMessage() (TwitchMessage, error) {
+	t.Lock()
+	defer t.Unlock()
 	msg := TwitchMessage{}
 	if t.c == nil {
 		return msg, ErrNoConnection
@@ -478,6 +541,8 @@ func (t *Twitch) ReceiveOneMessage() (TwitchMessage, error) {
 
 // Pong is keep alive
 func (t *Twitch) Pong(msg TwitchMessage) error {
+	t.Lock()
+	defer t.Unlock()
 	if t.c == nil {
 		return ErrNoConnection
 	}
