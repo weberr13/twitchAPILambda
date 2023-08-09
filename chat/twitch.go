@@ -35,13 +35,20 @@ var (
 	}
 	// TODO:
 	// Add 18+ or even 21+ depending on the content classification data we get back
-	// ContentClassificationLabels: "DrugsIntoxication", "ProfanityVulgarity", "ViolentGraphic"
+	// ContentClassificationLabels: "DrugsIntoxication", "ProfanityVulgarity", "ViolentGraphic", "SexualThemes", "MatureGame"
 	shoutoutMessages = []string{
-		`Welcome %s and check them out at https://twitch.tv/%s they were last playing "%s" and show them some love weberrSenaWow weberrSenaWow weberrSenaWow`,
-		`Hello %s everyone should check out their channel at https://twitch.tv/%s they were last playing "%s" weberrSenaWow weberrSenaWow weberrSenaWow`,
-		`Show this legend %s some love, and drop them a follow at https://twitch.tv/%s they were last playing "%s" weberrSenaWow weberrSenaWow weberrSenaWow`,
-		`Check this amazing streamer %s out at https://twitch.tv/%s they were last playing "%s" weberrSenaWow weberrSenaWow weberrSenaWow`,
-		`Please show this wonderfull streamer %s some love at https://twitch.tv/%s they were last playing "%s" weberrSenaWow weberrSenaWow weberrSenaWow`,
+		`Welcome %s and check them out at https://twitch.tv/%s they were last playing %s and show them some love weberrSenaWow weberrSenaWow weberrSenaWow`,
+		`Hello %s everyone should check out their channel at https://twitch.tv/%s they were last playing %s weberrSenaWow weberrSenaWow weberrSenaWow`,
+		`Show this legend %s some love, and drop them a follow at https://twitch.tv/%s they were last playing %s weberrSenaWow weberrSenaWow weberrSenaWow`,
+		`Check this amazing streamer %s out at https://twitch.tv/%s they were last playing %s weberrSenaWow weberrSenaWow weberrSenaWow`,
+		`Please show this wonderfull streamer %s some love at https://twitch.tv/%s they were last playing %s weberrSenaWow weberrSenaWow weberrSenaWow`,
+	}
+	eighteenPlusWarnings = map[string]string{
+		"DrugsIntoxication":  `drug and alcohol use`,
+		"ProfanityVulgarity": `profanity`,
+		"ViolentGraphic":     `graphic violence`,
+		"SexualThemes":       `sexual themes`,
+		"MatureGame":         `mature games`,
 	}
 	// TwitchCharacterLimit is the maximum message size
 	TwitchCharacterLimit = 500
@@ -69,6 +76,15 @@ func TrimBots(users map[string]string) {
 	for _, bot := range Bots() {
 		delete(users, bot)
 	}
+}
+
+func randIndex[T any](array []T) int {
+	iBig, err := rand.Int(rand.Reader, big.NewInt(int64(len(array))))
+	messgeIndex := 0
+	if err == nil {
+		messgeIndex = int(iBig.Int64())
+	}
+	return messgeIndex
 }
 
 // Shoutout a user
@@ -107,13 +123,22 @@ func (t *Twitch) Shoutout(channelName string, user string, manual bool) {
 	if !followed && manual {
 		log.Printf("I don't follow %#v %#v but shouting out regardless", userInfo, chanInfo)
 	}
-	iBig, err := rand.Int(rand.Reader, big.NewInt(int64(len(shoutoutMessages))))
-	messgeIndex := 0
-	if err == nil {
-		messgeIndex = int(iBig.Int64())
+	log.Printf("%s has content warnings: %#v", userInfo.Login, chanInfo.ContentClassificatinLables)
+	gameTitle := `"` + chanInfo.GameName + `"`
+	if len(chanInfo.ContentClassificatinLables) > 0 {
+		gameTitle += "--but be warned that this channel has 18+ content that includes "
+		for i, label := range chanInfo.ContentClassificatinLables {
+			if i > 0 {
+				gameTitle += ", "
+			}
+			gameTitle += eighteenPlusWarnings[label]
+		}
+		gameTitle += "--"
 	}
+	messgeIndex := randIndex(shoutoutMessages)
+
 	// TODO: Text Parsing {{.etc}}
-	str := fmt.Sprintf(shoutoutMessages[messgeIndex], user, alt, chanInfo.GameName)
+	str := fmt.Sprintf(shoutoutMessages[messgeIndex], user, alt, gameTitle)
 
 	err = t.SendMessage(channelName, str)
 	if err != nil {
@@ -183,20 +208,6 @@ type TwitchChannelInfo struct {
 	ContentClassificatinLables []string `json:"content_classification_labels"`
 	ISBrandedContent           bool     `json:"is_branded_content"`
 }
-
-// {
-// 	"broadcaster_id": "141981764",
-// 	"broadcaster_login": "twitchdev",
-// 	"broadcaster_name": "TwitchDev",
-// 	"broadcaster_language": "en",
-// 	"game_id": "509670",
-// 	"game_name": "Science & Technology",
-// 	"title": "TwitchDev Monthly Update // May 6, 2021",
-// 	"delay": 0,
-// 	"tags": ["DevsInTheKnow"],
-// 	"content_classification_labels": ["Gambling", "DrugsIntoxication", "MatureGame"],
-// 	"is_branded_content": false
-//   }
 
 // GetUserInfo gets the information on a user by login
 func (t *Twitch) GetUserInfo(login string) (*TwitchUserInfo, error) {

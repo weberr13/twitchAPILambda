@@ -276,6 +276,7 @@ readloop:
 			}
 		case chat.JoinMessage:
 			shoutouts := map[string]string{}
+			// newchatters := map[string]string{}
 			for k, v := range msg.Users() {
 				if _, ok := knownusers[k]; !ok {
 					shoutouts[k] = v
