@@ -1,0 +1,33 @@
+{
+	"twitch": {
+		"channelID": "403503512",
+		"channelName": "weberr13",
+		"youtube": "https://youtube.com/@weberr313",
+		"socials": [
+			"https://youtube.com/@weberr313", 
+			"https://www.tumblr.com/reweber313", 
+			"https://twitter.com/weberr13", 
+			"https://patreon.com/weberr13", 
+			"https://medium.com/@robert_70579", 
+			"https://discord.gg/w5hrYRf6Zs"
+		],
+		"timers": {
+			"pcghelp": {
+				"alias": "!pcghelp",
+				"waittime": "30m"
+			},
+			"socials": {
+				"alias": "!socials",
+				"waittime": "30m"
+			},
+			"pronouns": {
+				"message": "Weberr13 uses he/him pronouns, Artemis uses she/it and Mpo uses they/them. Also, the pronoun sharing extension is enabled on this channel! If you're comfortable sharing yours, you can find out how to display them here: https://pronounsfortwitch.carrd.co",
+				"waittime": "30m"
+			},
+			"current song": {
+				"message": "!songs current",
+				"waittime": "3m"
+			}
+		}
+	}
+}
