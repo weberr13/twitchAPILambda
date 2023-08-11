@@ -49,11 +49,36 @@ type DiscordBotConfig struct {
 
 // TwitchConfig params that allow a twitch bot to run
 type TwitchConfig struct {
-	ChannelName string                 `json:"channelName"`
-	ChannelID   string                 `json:"channelID"`
-	YouTube     string                 `json:"youtube"`
-	Socials     []string               `json:"socials"`
-	Timers      map[string]TimerConfig `json:"timers"`
+	ChannelName string                   `json:"channelName"`
+	ChannelID   string                   `json:"channelID"`
+	YouTube     string                   `json:"youtube"`
+	Socials     []string                 `json:"socials"`
+	Timers      map[string]TimerConfig   `json:"timers"`
+	Commands    map[string]CommandConfig `json:"commands"`
+}
+
+// CommandConfig is a simple command configuration
+type CommandConfig struct {
+	Message string   `json:"message"`
+	AKA     []string `json:"aka"`
+}
+
+// Valid determines if a custom command is valid
+func (cc *CommandConfig) Valid() bool {
+	return cc.Message != ""
+}
+
+// GetText gives the text that the command should send to the channel
+func (cc *CommandConfig) GetText() string {
+	if cc.Message != "" {
+		return cc.Message
+	}
+	return "I don't know how to do that, Dave"
+}
+
+// CommandAliases also know as commands
+func (cc *CommandConfig) CommandAliases() []string {
+	return cc.AKA
 }
 
 // TimerConfig configures a timer
@@ -168,31 +193,6 @@ func NewConfig() *Configuration {
 			localConfig := &Configuration{}
 			err = json.Unmarshal(b, localConfig)
 			if err == nil {
-				// if localConfig.ClientID != "" {
-				// 	ourConfig.ClientID = localConfig.ClientID
-				// }
-				// if localConfig.ClientSecret != "" {
-				// 	ourConfig.ClientSecret = localConfig.ClientSecret
-				// }
-				// if localConfig.OurURL != "" {
-				// 	ourConfig.OurURL = localConfig.OurURL
-				// }
-				// if localConfig.OpenAIKey != "" {
-				// 	ourConfig.OpenAIKey = localConfig.OpenAIKey
-				// }
-				// if localConfig.TableName != "" {
-				// 	ourConfig.TableName = localConfig.TableName
-				// }
-				// if localConfig.RedirectURL != "" {
-				// 	ourConfig.RedirectURL = localConfig.RedirectURL
-				// }
-				// if localConfig.SignSecret != "" {
-				// 	ourConfig.SignSecret = localConfig.SignSecret
-				// }
-				// This is server side only:
-				// AuthorizedChannels map[string]string `json:"authorizedChannels"`
-				// This is for the author only
-				// Discord            *DiscordBotConfig `json:"discord,omitempty"`
 				if localConfig.Twitch.ChannelID != "" {
 					ourConfig.Twitch.ChannelID = localConfig.Twitch.ChannelID
 				}
@@ -208,6 +208,12 @@ func NewConfig() *Configuration {
 				if len(localConfig.Twitch.Timers) > 0 {
 					for k, v := range localConfig.Twitch.Timers {
 						ourConfig.Twitch.Timers[k] = v
+					}
+				}
+				if len(localConfig.Twitch.Commands) > 0 {
+					ourConfig.Twitch.Commands = make(map[string]CommandConfig)
+					for k, v := range localConfig.Twitch.Commands {
+						ourConfig.Twitch.Commands[k] = v
 					}
 				}
 			} else {
