@@ -208,8 +208,7 @@ func (c *TwitchMessage) Parse(b []byte) error {
 		c.t = PingMessage
 		return nil
 	case strings.Contains(c.raw, "twitch.tv JOIN #"):
-		log.Print("JoinMessage")
-		log.Printf("raw join: %s", c.raw)
+		// log.Printf("raw join: %s", c.raw)
 		for _, l := range strings.Split(c.raw, "\r\n") {
 			if len(l) <= 2 {
 				continue

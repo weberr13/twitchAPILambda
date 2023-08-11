@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/weberr13/twitchAPILambda/autochat"
@@ -107,7 +108,6 @@ auth:
 			}
 			continue
 		}
-		log.Printf("authentication successful!!!")
 		break auth
 	}
 	defer tw.Close()
@@ -169,12 +169,15 @@ auth:
 					_ = tw.SendMessage(channelName, "The oracle has heard your question, please wait...")
 					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 					defer cancel()
-					resp, err := autoChatter.CreateCompletion(ctx, msg.GetBotCommandArgs())
+					user := strings.TrimPrefix(msg.User(), ":")
+					log.Printf(`requestor "%s" msg:"%#v"`, user, msg)
+					resp, err := autoChatter.CreateCompletion(ctx, msg.GetBotCommandArgs(), autochat.WithRateLimit(user, 5*time.Minute))
 					if err != nil {
 						log.Printf("openai failed: %s", err)
 						_ = tw.SendMessage(channelName, "I cannot answer that right now, Dave")
 						return
 					}
+					// TODO: this spilt failed, I missed the middle when it split 3 times.  Write a test
 					preamble := "The oracle has concluded that: "
 					if len(resp) > chat.TwitchCharacterLimit-len(preamble) {
 						for len(resp) > chat.TwitchCharacterLimit-len(preamble) {
@@ -186,6 +189,7 @@ auth:
 							}
 							resp = resp[chat.TwitchCharacterLimit-len(preamble):]
 							preamble = "cont: "
+							time.Sleep(1 * time.Second) // maybe we sent messages too fast?
 						}
 					}
 					err = tw.SendMessage(channelName, fmt.Sprintf("%s%s", preamble, resp))
@@ -268,6 +272,37 @@ auth:
 				log.Printf("could not send vote info for %s: %s", msg.DisplayName(), err)
 			}
 		},
+	}
+	for newCmd, detail := range ourConfig.Twitch.Commands {
+		if detail.Valid() {
+			commands[strings.TrimPrefix(newCmd, "!")] = func(msg chat.TwitchMessage) {
+				err = tw.SendMessage(channelName, detail.GetText())
+				if err != nil {
+					log.Printf("could run custom command %s: %s", newCmd, err)
+				}
+			}
+			for _, aka := range detail.CommandAliases() {
+				commands[strings.TrimPrefix(aka, "!")] = func(msg chat.TwitchMessage) {
+					err = tw.SendMessage(channelName, detail.GetText())
+					if err != nil {
+						log.Printf("could run custom command %s: %s", aka, err)
+					}
+				}
+			}
+		} else {
+			log.Printf("found unexpected command %s: %v", newCmd, detail)
+		}
+	}
+	commands["getcommands"] = func(msg chat.TwitchMessage) {
+		// TODO: commands should have descriptions
+		allCmds := []string{}
+		for k := range commands {
+			allCmds = append(allCmds, fmt.Sprintf("!%s", k))
+		}
+		err = tw.SendMessage(channelName, strings.Join(allCmds, ", "))
+		if err != nil {
+			log.Printf("could run getcommands: %s", err)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

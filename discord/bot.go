@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/weberr13/twitchAPILambda/autochat"
 	"github.com/weberr13/twitchAPILambda/config"
 )
 
@@ -45,7 +46,19 @@ func (bc *BotClient) AskCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		for _, opt := range options {
 			optionMap[opt.Name] = opt
 		}
-		resp, err := bc.chat.CreateCompletion(ctx, optionMap["question"].StringValue())
+		user := "default"
+		if i.User != nil {
+			user = i.User.Username
+		} else if i.Member != nil {
+			if i.Member.User != nil {
+				user = i.Member.User.Username
+			} else if i.Member.Nick != "" {
+				user = i.Member.Nick
+			}
+		}
+		log.Printf("determined user of requestor is %s", user)
+
+		resp, err := bc.chat.CreateCompletion(ctx, optionMap["question"].StringValue(), autochat.WithRateLimit(user, 5*time.Minute))
 		if err != nil {
 			log.Printf("openai failed: %s", err)
 			respC <- "I cannot answer that right now, Dave"
@@ -85,7 +98,7 @@ func (bc *BotClient) AskCommand(s *discordgo.Session, i *discordgo.InteractionCr
 
 // AutoChatterer can do chat stuff
 type AutoChatterer interface {
-	CreateCompletion(ctx context.Context, message string) (string, error)
+	CreateCompletion(ctx context.Context, message string, opts ...autochat.CompletionOpt) (string, error)
 }
 
 // BotClient is the bot client struct

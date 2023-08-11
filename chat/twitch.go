@@ -156,7 +156,7 @@ func (t *Twitch) Shoutout(channelName string, user string, manual bool) {
 		log.Printf("could not get channel info, not doing a shoutout: %s", err)
 		return
 	}
-	log.Printf("*** channel info %#v", chanInfo)
+	// log.Printf("*** channel info %#v", chanInfo)
 	if chanInfo.GameName == "" || chanInfo.GameName == "<none>" {
 		log.Printf("not shouting out user as they don't stream")
 		return
