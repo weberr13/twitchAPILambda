@@ -37,6 +37,12 @@ var LevelAsNumber = map[string]int{
 	"everyone":   5,
 }
 
+// OBS websocket config
+type OBS struct {
+	// HOST:Port not yet configurable, use localhost 4455
+	Password string `json:"password"`
+}
+
 // DiscordBotConfig configures a registered discord bot
 type DiscordBotConfig struct {
 	ApplicationID     string              `json:"applicationID"`
@@ -99,6 +105,12 @@ func (t TimerConfig) WaitFor() time.Duration {
 	return d
 }
 
+// LocalOBS settings ie: scenes and sources
+type LocalOBS struct {
+	MusicSource string `json:"musicSource"`
+	PromoSource string `json:"promoSource"`
+}
+
 // Configuration embedded at build time
 type Configuration struct {
 	ClientSecret       string            `json:"clientSecret"`
@@ -111,6 +123,8 @@ type Configuration struct {
 	AuthorizedChannels map[string]string `json:"authorizedChannels"`
 	Discord            *DiscordBotConfig `json:"discord,omitempty"`
 	Twitch             TwitchConfig      `json:"twitch"`
+	OBS                OBS               `json:"obs"`
+	LocalOBS           LocalOBS          `json:"localOBS"`
 }
 
 // TokenResponse contains the server side cached token
@@ -218,6 +232,7 @@ func NewConfig() *Configuration {
 						ourConfig.Twitch.Commands[k] = v
 					}
 				}
+				ourConfig.LocalOBS = localConfig.LocalOBS // No globals
 			} else {
 				panic(err)
 			}
