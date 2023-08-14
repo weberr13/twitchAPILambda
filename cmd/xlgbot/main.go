@@ -17,6 +17,7 @@ import (
 	"github.com/weberr13/twitchAPILambda/config"
 	"github.com/weberr13/twitchAPILambda/discord"
 	"github.com/weberr13/twitchAPILambda/kukoro"
+	"github.com/weberr13/twitchAPILambda/obs"
 	"github.com/weberr13/twitchAPILambda/pcg"
 )
 
@@ -78,6 +79,34 @@ func main() {
 			log.Printf("could not send discord test message: %s", err)
 		}
 	}
+	obsC, err := obs.NewClient(ourConfig.OBS.Password)
+	if err != nil {
+		log.Printf("could not start OBS websocket client: %s", err)
+	} else {
+		defer obsC.Close()
+		v, err := obsC.GetVersion()
+		if err != nil {
+			log.Printf("could not get obs version: %s", err)
+		} else {
+			log.Printf("OBS Version: %s", v)
+		}
+		s, err := obsC.GetScenes()
+		if err != nil {
+			log.Printf("could not get obs scenes: %s", err)
+		} else {
+			log.Printf("OBS Scenes:\n%s", s)
+		}
+		scene, i, err := obsC.GetSourcesForCurrentScene()
+		if err != nil {
+			log.Printf("could not get obs sources: %s", err)
+		} else {
+			log.Printf("OBS Sources for %s:\n", scene)
+			for _, source := range i {
+				log.Printf("%s: %v", source.SourceName, *source)
+			}
+		}
+	}
+
 auth:
 	for {
 		log.Printf("attempting to authenticate")
@@ -152,6 +181,21 @@ auth:
 		return
 	}
 	commands := map[string]func(msg chat.TwitchMessage){
+		"promo": func(msg chat.TwitchMessage) {
+			if msg.IsMod() {
+				s := msg.GetBotCommandArgs()
+				if s != "" {
+					err := obsC.SetPromoYoutube(s)
+					if err != nil {
+						log.Printf("could set promo: %s", err)
+					}
+				} 
+				err := obsC.TogglePromo()
+				if err != nil {
+					log.Printf("could not run promo: %s", err)
+				}
+			}
+		},
 		"clip": func(msg chat.TwitchMessage) {
 			if msg.IsMod() || msg.IsSub() || msg.IsVIP() {
 				_ = tw.SendMessage(channelName, "a clip is being processed, give twitch time...")

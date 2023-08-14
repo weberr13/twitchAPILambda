@@ -37,6 +37,12 @@ var LevelAsNumber = map[string]int{
 	"everyone":   5,
 }
 
+// OBS websocket config
+type OBS struct {
+	// HOST:Port not yet configurable, use localhost 4455
+	Password string `json:"password"`
+}
+
 // DiscordBotConfig configures a registered discord bot
 type DiscordBotConfig struct {
 	ApplicationID     string              `json:"applicationID"`
@@ -111,6 +117,7 @@ type Configuration struct {
 	AuthorizedChannels map[string]string `json:"authorizedChannels"`
 	Discord            *DiscordBotConfig `json:"discord,omitempty"`
 	Twitch             TwitchConfig      `json:"twitch"`
+	OBS                OBS               `json:"obs"`
 }
 
 // TokenResponse contains the server side cached token
