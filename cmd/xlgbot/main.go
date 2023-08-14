@@ -185,12 +185,16 @@ auth:
 			if msg.IsMod() {
 				s := msg.GetBotCommandArgs()
 				if s != "" {
-					err := obsC.SetPromoYoutube(s)
+					err := obsC.SetPromoYoutube(ourConfig.LocalOBS.PromoSource, s)
 					if err != nil {
 						log.Printf("could set promo: %s", err)
 					}
-				} 
-				err := obsC.TogglePromo()
+				}
+				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+				if err != nil {
+					log.Printf("could not toggle audio: %s", err)
+				}
+				err := obsC.TogglePromo(ourConfig.LocalOBS.PromoSource)
 				if err != nil {
 					log.Printf("could not run promo: %s", err)
 				}

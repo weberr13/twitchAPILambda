@@ -1,4 +1,8 @@
 {
+	"localOBS": {
+		"musicSource": "DMCA",
+		"promoSource": "Promo"
+	},
 	"twitch": {
 		"channelID": "12324",
 		"channelName": "weberr13",

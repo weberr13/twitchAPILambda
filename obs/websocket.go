@@ -3,6 +3,8 @@ package obs
 import (
 	"fmt"
 	"log"
+	"net/url"
+	"strings"
 
 	"github.com/andreykaipov/goobs"
 	"github.com/andreykaipov/goobs/api/requests/inputs"
@@ -78,24 +80,42 @@ func (c *Client) GetSourcesForCurrentScene() (string, []*typedefs.SceneItem, err
 }
 
 // SetPromoYoutube sets the promo video
-func (c *Client) SetPromoYoutube(videoHash string) error {
+func (c *Client) SetPromoYoutube(promoSourceName string, videoHash string) error {
+	// TODO: Extract hash programaticaly
+	if strings.HasPrefix(videoHash, "http://") {
+		return fmt.Errorf("invalid video link")
+	}
+	if strings.HasPrefix(videoHash, "https://") {
+		if strings.HasPrefix(videoHash, "https://youtu.be") || strings.HasPrefix(videoHash, "https://youtube.com") {
+			log.Printf("parsing youtube url")
+			u, err := url.Parse(videoHash)
+			if err == nil {
+				log.Printf("url is %s", u)
+				pathElements := strings.Split(u.Path, "/")
+				videoHash = pathElements[len(pathElements)-1]
+			}
+		} else {
+			return fmt.Errorf("invalid video link")
+		}
+	}
+
 	_, sources, err := c.GetSourcesForCurrentScene()
 	if err != nil {
 		return err
 	}
 	for _, source := range sources {
-		if source.SourceName == "Promo" {
+		if source.SourceName == promoSourceName {
 			in, err := c.c.Inputs.GetInputSettings(&inputs.GetInputSettingsParams{
 				InputName: source.SourceName,
 			})
 			if err != nil {
 				return err
-			} 
+			}
 			log.Printf("input settings %v", *in)
 			in.InputSettings["url"] = fmt.Sprintf("https://youtube.com/embed/%s?autoplay=1&modestbranding=1", videoHash)
 			_, err = c.c.Inputs.SetInputSettings(&inputs.SetInputSettingsParams{
 				InputSettings: in.InputSettings,
-				InputName: source.SourceName,
+				InputName:     source.SourceName,
 			})
 			return err
 			// input settings {browser_source map[reroute_audio:true restart_when_active:true shutdown:true url:https://youtube.com/embed/1Wn6yjwifm4?autoplay=1&modestbranding=1]}
@@ -104,16 +124,32 @@ func (c *Client) SetPromoYoutube(videoHash string) error {
 	return nil
 }
 
-// TogglePromo enables the promo scene if found
-func (c *Client) TogglePromo() error {
+// ToggleSourceAudio will multe/unmute the named audio source
+func (c *Client) ToggleSourceAudio(name string) error {
+	_, sources, err := c.GetSourcesForCurrentScene()
+	if err != nil {
+		return err
+	}
+	for _, source := range sources {
+		if source.SourceName == name {
+			_, err := c.c.Inputs.ToggleInputMute(&inputs.ToggleInputMuteParams{
+				InputName: source.SourceName,
+			})
+			return err
+		}
+	}
+	return fmt.Errorf("could not find source %s", name)
+}
 
+// TogglePromo enables the promo scene if found
+func (c *Client) TogglePromo(promoSourceName string) error {
 	currentScene, sources, err := c.GetSourcesForCurrentScene()
 	if err != nil {
 		return err
 	}
 	newState := false
 	for _, source := range sources {
-		if source.SourceName == "Promo" {
+		if source.SourceName == promoSourceName {
 			newState = !source.SceneItemEnabled
 			_, err = c.c.SceneItems.SetSceneItemEnabled(&sceneitems.SetSceneItemEnabledParams{
 				SceneItemEnabled: &newState,
@@ -125,6 +161,5 @@ func (c *Client) TogglePromo() error {
 			}
 		}
 	}
-	return fmt.Errorf("could not find Promo scene")
+	return fmt.Errorf("could not find Promo scene: %s", promoSourceName)
 }
-

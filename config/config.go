@@ -105,6 +105,12 @@ func (t TimerConfig) WaitFor() time.Duration {
 	return d
 }
 
+// LocalOBS settings ie: scenes and sources
+type LocalOBS struct {
+	MusicSource string `json:"musicSource"`
+	PromoSource string `json:"promoSource"`
+}
+
 // Configuration embedded at build time
 type Configuration struct {
 	ClientSecret       string            `json:"clientSecret"`
@@ -118,6 +124,7 @@ type Configuration struct {
 	Discord            *DiscordBotConfig `json:"discord,omitempty"`
 	Twitch             TwitchConfig      `json:"twitch"`
 	OBS                OBS               `json:"obs"`
+	LocalOBS           LocalOBS          `json:"localOBS"`
 }
 
 // TokenResponse contains the server side cached token
@@ -225,6 +232,7 @@ func NewConfig() *Configuration {
 						ourConfig.Twitch.Commands[k] = v
 					}
 				}
+				ourConfig.LocalOBS = localConfig.LocalOBS // No globals
 			} else {
 				panic(err)
 			}
