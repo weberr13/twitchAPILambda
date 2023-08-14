@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/google/uuid"
 	"github.com/weberr13/twitchAPILambda/autochat"
 	"github.com/weberr13/twitchAPILambda/config"
 )
@@ -79,7 +82,7 @@ func (bc *BotClient) AskCommand(s *discordgo.Session, i *discordgo.InteractionCr
 			log.Printf("failed to send message: %s", err)
 		}
 		content := <-respC
-		err = bc.SendMessage(i.ChannelID, content)
+		_, err = bc.SendMessage(i.ChannelID, content)
 		if err != nil {
 			log.Printf("failed to send message: %s", err)
 		}
@@ -108,6 +111,7 @@ type BotClient struct {
 	replyChan          map[string]struct{}
 	chat               AutoChatterer
 	registeredCommands []*discordgo.ApplicationCommand
+	sync.RWMutex
 }
 
 // NewBot makes a bot
@@ -155,6 +159,99 @@ func NewBot(conf config.DiscordBotConfig, autochater AutoChatterer) (*BotClient,
 	return bc, nil
 }
 
+// StreamInfo needed for go-live notifs
+type StreamInfo struct {
+	UserLogin    string    `json:"user_login"`
+	UserName     string    `json:"user_name"`
+	GameName     string    `json:"game_name"`
+	Type         string    `json:"type"` // "live"
+	Title        string    `json:"title"`
+	ViewerCount  int       `json:"viewer_count"`
+	StartedAt    time.Time `json:"started_at"`
+	Language     string    `json:"language"`
+	ThumbnailURL string    `json:"thumbnail_url"`
+	IsMature     bool      `json:"is_mature"`
+}
+
+// GetLiveWrapper is a function that returns stream info normalized for what this package requires
+type GetLiveWrapper func([]string) (map[string]StreamInfo, error)
+
+// SINGLE THREADED!
+func (bc *BotClient) sendShoutoutToChannelForUsers(knownUsers map[string]*discordgo.Message, users []string, channel string, getLiveF GetLiveWrapper) {
+	streams, err := getLiveF(users)
+	if err != nil {
+		log.Printf("could not get live streams: %s", err)
+		return
+	}
+	log.Printf("live streams of interest are %#v", streams)
+	for user, msg := range knownUsers {
+		if sinfo, ok := streams[user]; ok {
+			if sinfo.Type != "live" {
+				log.Printf("stream no longer live: remove message with ID: %s in Channel %s, in Guild %s", msg.ID, msg.ChannelID, msg.GuildID)
+				err := bc.DeleteMessage(msg.ChannelID, msg.ID)
+				if err != nil {
+					log.Printf("could not remove our golive message %s", err)
+				}
+				delete(knownUsers, user)
+			} else {
+				log.Printf("updating with the new thumbnail: %s", sinfo.ThumbnailURL)
+				msg, err := bc.UpdateGoLiveMessage(msg,
+					fmt.Sprintf(`%s is live playing with %d viewers`, sinfo.UserName, sinfo.ViewerCount),
+					sinfo.ThumbnailURL, fmt.Sprintf("https://twitch.tv/%s", sinfo.UserLogin), sinfo.GameName)
+				if err != nil {
+					log.Printf("could not send msg: %s", err)
+				}
+				knownUsers[user] = msg
+			}
+		} else {
+			// remove go live message
+			log.Printf("can't find stream: remove message with ID: %s in Channel %s, in Guild %s", msg.ID, msg.ChannelID, msg.GuildID)
+			err := bc.DeleteMessage(msg.ChannelID, msg.ID)
+			if err != nil {
+				log.Printf("could not remove our golive message %s", err)
+			}
+			delete(knownUsers, user)
+		}
+	}
+	for user, sinfo := range streams {
+		if _, ok := knownUsers[user]; !ok && sinfo.Type == "live" {
+			msg, err := bc.SendGoLIveMessage(channel,
+				fmt.Sprintf(`%s is live playing with %d viewers`, sinfo.UserName, sinfo.ViewerCount),
+				sinfo.ThumbnailURL, fmt.Sprintf("https://twitch.tv/%s", sinfo.UserLogin), sinfo.GameName)
+			if err != nil {
+				log.Printf("could not send msg: %s", err)
+				return
+			}
+			knownUsers[user] = msg
+		}
+	}
+}
+
+// RunAutoShoutouts will start an asyncronous runner that manages shoutouts
+func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, chanToUsers map[string][]string, getLiveF GetLiveWrapper) {
+	wg.Add(1)
+	go func() {
+		knownUsers := map[string]map[string]*discordgo.Message{}
+		defer wg.Done()
+		timer := time.NewTicker(60 * time.Second) // TODO: configurable?
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				// clean up?
+				return
+			case <-timer.C:
+				for channel, users := range chanToUsers {
+					if _, ok := knownUsers[channel]; !ok {
+						knownUsers[channel] = make(map[string]*discordgo.Message)
+					}
+					bc.sendShoutoutToChannelForUsers(knownUsers[channel], users, channel, getLiveF)
+				}
+			}
+		}
+	}()
+}
+
 // Close down the backend connection cleanly
 func (bc *BotClient) Close() error {
 	if bc.client == nil {
@@ -187,7 +284,7 @@ func (bc *BotClient) Close() error {
 // BroadcastMessage sends a simple message
 func (bc *BotClient) BroadcastMessage(channels []string, message string) error {
 	for _, channel := range channels {
-		err := bc.SendMessage(channel, message)
+		_, err := bc.SendMessage(channel, message)
 		if err != nil {
 			log.Printf("could not sent to %s: %s", channel, err)
 		}
@@ -197,12 +294,88 @@ func (bc *BotClient) BroadcastMessage(channels []string, message string) error {
 }
 
 // SendMessage sends a simple message to a channel
-func (bc *BotClient) SendMessage(channel string, message string) error {
-	_, err := bc.client.ChannelMessageSend(channel, message)
-	if err != nil {
-		return err
+func (bc *BotClient) SendMessage(channel string, message string) (*discordgo.Message, error) {
+	bc.Lock()
+	defer bc.Unlock()
+	return bc.client.ChannelMessageSend(channel, message)
+}
+
+// UpdateGoLiveMessage update a golive with new info
+func (bc *BotClient) UpdateGoLiveMessage(old *discordgo.Message, title, thumbnail, url, game string) (*discordgo.Message, error) {
+	msg := bc.formatGoLive(title, thumbnail, url, game)
+
+	msgEdit := &discordgo.MessageEdit{
+		Content:         &msg.Content,
+		Embeds:          msg.Embeds,
+		Components:      msg.Components,
+		Flags:           old.Flags,
+		AllowedMentions: msg.AllowedMentions,
+		Files:           msg.Files,
+		Attachments:     &old.Attachments,
+		Embed:           msg.Embed,
+		ID:              old.ID,
+		Channel:         old.ChannelID,
 	}
-	return nil
+	bc.Lock()
+	defer bc.Unlock()
+	return bc.client.ChannelMessageEditComplex(msgEdit)
+}
+
+func (bc *BotClient) formatGoLive(title, thumbnail, url, game string) *discordgo.MessageSend {
+	height := 108 * 2
+	width := 192 * 2
+	embeds := []*discordgo.MessageEmbed{}
+	imageURL := strings.ReplaceAll(strings.ReplaceAll(thumbnail, "{width}", fmt.Sprintf("%d", width)), "{height}", fmt.Sprintf("%d", height))
+	imageURL += "?" + uuid.Must(uuid.NewRandom()).String()
+	embeds = append(embeds, &discordgo.MessageEmbed{
+		Title:       "Twtich",
+		Description: title,
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "brought to you by xlgbot @weberr13",
+		},
+		URL: url,
+		Image: &discordgo.MessageEmbedImage{
+			URL:    imageURL,
+			Width:  width,
+			Height: height,
+		},
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:  "Game",
+				Value: game,
+			},
+		},
+	})
+	msg := &discordgo.MessageSend{
+		Components: []discordgo.MessageComponent{
+			&discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					&discordgo.Button{
+						Style: discordgo.LinkButton,
+						Label: "Watch Now",
+						URL:   url,
+					},
+				},
+			},
+		},
+		Embeds: embeds,
+	}
+	return msg
+}
+
+// SendGoLIveMessage send a message with embedds included
+func (bc *BotClient) SendGoLIveMessage(channel string, title, thumbnail, url, game string) (*discordgo.Message, error) {
+	msg := bc.formatGoLive(title, thumbnail, url, game)
+	bc.Lock()
+	defer bc.Unlock()
+	return bc.client.ChannelMessageSendComplex(channel, msg)
+}
+
+// DeleteMessage deletes a message that we sent
+func (bc *BotClient) DeleteMessage(channelID, messageID string) error {
+	bc.Lock()
+	defer bc.Unlock()
+	return bc.client.ChannelMessageDelete(channelID, messageID)
 }
 
 // // This function will be called (due to AddHandler above) every time a new

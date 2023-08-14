@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.18.1
 	github.com/bwmarrin/discordgo v0.27.1
 	github.com/golang-jwt/jwt v3.2.2+incompatible
+	github.com/google/uuid v1.3.0
 	github.com/gorilla/websocket v1.5.0
 	github.com/morelj/lambada v0.1.3
 	github.com/sashabaranov/go-openai v1.14.1
