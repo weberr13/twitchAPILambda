@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/weberr13/twitchAPILambda/autochat"
@@ -111,6 +113,33 @@ auth:
 		break auth
 	}
 	defer tw.Close()
+	appContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wg := &sync.WaitGroup{}
+	discordBot.RunAutoShoutouts(appContext, wg, ourConfig.Discord.GoLiveChannels, func(users []string) (map[string]discord.StreamInfo, error) {
+		m := make(map[string]discord.StreamInfo)
+		twitchChans, err := tw.GetAllStreamInfoForUsers(users)
+		if err != nil {
+			log.Printf("could not get live channels for twitch: %s", err)
+			return m, err
+		}
+		for user, st := range twitchChans {
+			m[user] = discord.StreamInfo{
+				UserLogin:    st.UserLogin,
+				UserName:     st.UserName,
+				GameName:     st.GameName,
+				Type:         st.Type,
+				Title:        st.Title,
+				ViewerCount:  st.ViewerCount,
+				StartedAt:    st.StartedAt,
+				Language:     st.Language,
+				ThumbnailURL: st.ThumbnailURL,
+				IsMature:     st.IsMature,
+			}
+		}
+		// Can support other platforms
+		return m, nil
+	})
 	err = tw.JoinChannels(channelName)
 	if err != nil {
 		log.Printf("could not join channel on twitch: %s", err)
@@ -167,7 +196,7 @@ auth:
 			if msg.IsMod() || msg.IsSub() || msg.IsVIP() {
 				func() {
 					_ = tw.SendMessage(channelName, "The oracle has heard your question, please wait...")
-					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					ctx, cancel := context.WithTimeout(appContext, 30*time.Second)
 					defer cancel()
 					user := strings.TrimPrefix(msg.User(), ":")
 					log.Printf(`requestor "%s" msg:"%#v"`, user, msg)
@@ -274,6 +303,8 @@ auth:
 		},
 	}
 	for newCmd, detail := range ourConfig.Twitch.Commands {
+		newCmd := newCmd
+		detail := detail
 		if detail.Valid() {
 			commands[strings.TrimPrefix(newCmd, "!")] = func(msg chat.TwitchMessage) {
 				err = tw.SendMessage(channelName, detail.GetText())
@@ -282,6 +313,7 @@ auth:
 				}
 			}
 			for _, aka := range detail.CommandAliases() {
+				aka := aka
 				commands[strings.TrimPrefix(aka, "!")] = func(msg chat.TwitchMessage) {
 					err = tw.SendMessage(channelName, detail.GetText())
 					if err != nil {
@@ -305,8 +337,6 @@ auth:
 		}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	for _, timer := range ourConfig.Twitch.Timers {
 		// wg.Add(1)
 		if timer.Alias == "" && timer.Message == "" {
@@ -325,7 +355,7 @@ auth:
 			defer tick.Stop()
 			for {
 				select {
-				case <-ctx.Done():
+				case <-appContext.Done():
 					return
 				case <-tick.C:
 					func() {
@@ -377,10 +407,31 @@ readloop:
 					log.Printf("could not check pokemon %s", msg.Body())
 				}
 				if discordBot != nil {
-					err := discordBot.BroadcastMessage(ourConfig.Discord.BroadcastChannels, fmt.Sprintf("a pokemon has spawned in %s, go to https://twitch.tv/%s to catch it: %s", channelName, channelName, msg.Body()))
-					if err != nil {
-						log.Printf("could not post pokemon spawn: %s", err)
+					pokename := msg.Body()
+					// ACTION OhMyDog A wild Snubbull appears OhMyDog Catch it using !pokecatch (winners revealed in 90s)
+					i := strings.Index(pokename, "A wild ")
+					j := strings.Index(pokename, " appears")
+					if i > 0 && j > i {
+						pokename = pokename[i+len("A wild ") : j]
 					}
+					urlName := regexp.MustCompile(`[^a-z0-9 ]+`).ReplaceAllString(strings.ToLower(pokename), "")
+					urlName = strings.ReplaceAll(urlName, " ", "-")
+
+					for _, ch := range ourConfig.Discord.PCGChannels {
+						msg, err := discordBot.SendMessage(ch, fmt.Sprintf("A wild [%s](https://www.pokemon.com/us/pokedex/%s) has spawned in %s, go to https://twitch.tv/%s to catch it", pokename, urlName, channelName, channelName))
+						if err != nil {
+							log.Printf("could not post pokemon spawn: %s", err)
+						} else {
+							go func(chanID, msgID string) {
+								time.Sleep(90 * time.Second)
+								err := discordBot.DeleteMessage(chanID, msgID)
+								if err != nil {
+									log.Printf("could not delete spawn message: %s", err)
+								}
+							}(msg.ChannelID, msg.ID)
+						}
+					}
+
 				}
 			case msg.User() == "weberr13":
 				if kukoro.IsKukoroMsg(msg) {

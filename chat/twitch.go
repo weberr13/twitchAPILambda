@@ -35,6 +35,7 @@ var (
 		"thanks for stopping by %s weberrSenaWave",
 		"adios %s weberrSenaWave",
 		"hasta la vista %s weberrSenaWave",
+		"%s may be trying to lurk but failed to keep the tab open weberrNoahCry",
 	}
 	// TODO:
 	// Add 18+ or even 21+ depending on the content classification data we get back
@@ -331,6 +332,79 @@ func (t *Twitch) GetChannelInfo(userInfo *TwitchUserInfo) (*TwitchChannelInfo, e
 		return chanInfo.Data[0], nil
 	}
 	return nil, fmt.Errorf("user %#v not found", userInfo)
+}
+
+// TwitchStreamInfo contains info that twitch api provides on live streams
+type TwitchStreamInfo struct {
+	ID           string    `json:"id"`
+	UserID       string    `json:"user_id"`
+	UserLogin    string    `json:"user_login"`
+	UserName     string    `json:"user_name"`
+	GameID       string    `json:"game_id"`
+	GameName     string    `json:"game_name"`
+	Type         string    `json:"type"` // "live"
+	Title        string    `json:"title"`
+	Tags         []string  `json:"tags"`
+	ViewerCount  int       `json:"viewer_count"`
+	StartedAt    time.Time `json:"started_at"`
+	Language     string    `json:"language"`
+	ThumbnailURL string    `json:"thumbnail_url"`
+	TagIDs       []string  `json:"tag_ids"`
+	IsMature     bool      `json:"is_mature"`
+}
+
+// GetAllStreamInfoForUsers will give the stream info for the given channel names
+// curl -X GET 'https://api.twitch.tv/helix/streams'
+// https://dev.twitch.tv/docs/api/reference/#get-streams
+func (t *Twitch) GetAllStreamInfoForUsers(usernames []string) (map[string]TwitchStreamInfo, error) {
+	m := make(map[string]TwitchStreamInfo)
+	if len(usernames) < 1 {
+		return m, nil
+	}
+	if len(usernames) > 100 {
+		return nil, fmt.Errorf("twitch API limits requests to 100 users at a time")
+	}
+	reqString := "https://api.twitch.tv/helix/streams"
+	for i, user := range usernames {
+		if i == 0 {
+			reqString += "?"
+		} else {
+			reqString += "&"
+		}
+		reqString += "user_login=" + user
+	}
+	reqString += fmt.Sprintf("&first=%d", len(usernames))
+	req, err := http.NewRequest(http.MethodGet, reqString, nil)
+	if err != nil {
+		return m, fmt.Errorf("cannot make request: %w", err)
+	}
+	t.cfg.SetAuthorization(req, t.token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return m, fmt.Errorf("cannot do request: %w", err)
+	}
+	if res.Body != nil {
+		defer res.Body.Close()
+	}
+	if res.StatusCode > http.StatusMultipleChoices {
+		return m, fmt.Errorf("got back %d on get streams command", res.StatusCode)
+	}
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		return m, err
+	}
+	type respData struct {
+		Data []TwitchStreamInfo `json:"data"` // TODO: do we want this to be the real thing?
+	}
+	streams := &respData{}
+	err = json.Unmarshal(b, streams)
+	if err != nil {
+		return m, err
+	}
+	for _, stream := range streams.Data {
+		m[stream.UserLogin] = stream
+	}
+	return m, nil
 }
 
 // IFollowThem checks if a channel is followed by the channel running the bot, used by auto-shoutout
