@@ -30,6 +30,6 @@ docs/github.com/
 docs/index.html
 docs/lib/
 docs/src/
-config.json
+config.json*
 # Dependency directories (remove the comment below to include it)
 # vendor/

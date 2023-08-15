@@ -20,20 +20,6 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// 2023/08/09 16:35:00 got :
-// 2023/08/09 16:35:00 Removing commands...
-// panic: repeated read on failed websocket connection
-
-// goroutine 1 [running]:
-// github.com/gorilla/websocket.(*Conn).NextReader(0xc0000e6160)
-//         C:/Users/reweb/go/pkg/mod/github.com/gorilla/websocket@v1.5.0/conn.go:1030 +0x2a8
-// github.com/gorilla/websocket.(*Conn).ReadMessage(0xc0004f85e0?)
-//         C:/Users/reweb/go/pkg/mod/github.com/gorilla/websocket@v1.5.0/conn.go:1093 +0x19
-// github.com/weberr13/twitchAPILambda/chat.(*Twitch).ReceiveOneMessage(0xc00008b860?)
-//         C:/cygwin64/home/reweb/src/github.com/twitchAPILambda/chat/twitch.go:531 +0x10e
-// main.main()
-//         C:/cygwin64/home/reweb/src/github.com/twitchAPILambda/cmd/xlgbot/main.go:320 +0x1b65
-
 var (
 	ourConfig    *config.Configuration
 	oauth2Config *oauth2.Config

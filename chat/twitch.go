@@ -100,7 +100,7 @@ func (t *Twitch) Clip() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	t.cfg.SetAuthorization(req, t.token)
+	t.authorizeRequest(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
@@ -217,7 +217,8 @@ type Twitch struct {
 	cfg          *config.Configuration
 	token        string
 	hostUserInfo *TwitchUserInfo
-	sync.Mutex
+	url          url.URL
+	sync.RWMutex
 }
 
 // NewTwitch chat interface
@@ -227,7 +228,22 @@ func NewTwitch(cfg *config.Configuration) (*Twitch, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Twitch{c: c, cfg: cfg}, nil
+	return &Twitch{c: c, cfg: cfg, url: u}, nil
+}
+
+// Open the connection again
+func (t *Twitch) Open() error {
+	t.Lock()
+	defer t.Unlock()
+	if t.c != nil {
+		return nil
+	}
+	c, _, err := websocket.DefaultDialer.Dial(t.url.String(), nil)
+	if err != nil {
+		return err
+	}
+	t.c = c
+	return nil
 }
 
 // TwitchUserInfo response from GetUser
@@ -267,7 +283,7 @@ func (t *Twitch) GetUserInfo(login string) (*TwitchUserInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot make request: %w", err)
 	}
-	t.cfg.SetAuthorization(req, t.token)
+	t.authorizeRequest(req)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("cannot do request: %w", err)
@@ -305,7 +321,7 @@ func (t *Twitch) GetChannelInfo(userInfo *TwitchUserInfo) (*TwitchChannelInfo, e
 	if err != nil {
 		return nil, fmt.Errorf("cannot make request: %w", err)
 	}
-	t.cfg.SetAuthorization(req, t.token)
+	t.authorizeRequest(req)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("cannot do request: %w", err)
@@ -353,6 +369,12 @@ type TwitchStreamInfo struct {
 	IsMature     bool      `json:"is_mature"`
 }
 
+func (t *Twitch) authorizeRequest(req *http.Request) {
+	t.RLock()
+	defer t.RUnlock()
+	t.cfg.SetAuthorization(req, t.token)
+}
+
 // GetAllStreamInfoForUsers will give the stream info for the given channel names
 // curl -X GET 'https://api.twitch.tv/helix/streams'
 // https://dev.twitch.tv/docs/api/reference/#get-streams
@@ -378,7 +400,7 @@ func (t *Twitch) GetAllStreamInfoForUsers(usernames []string) (map[string]Twitch
 	if err != nil {
 		return m, fmt.Errorf("cannot make request: %w", err)
 	}
-	t.cfg.SetAuthorization(req, t.token)
+	t.authorizeRequest(req)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return m, fmt.Errorf("cannot do request: %w", err)
@@ -421,7 +443,7 @@ func (t *Twitch) IFollowThem(theirID string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("cannot make request: %w", err)
 	}
-	t.cfg.SetAuthorization(req, t.token)
+	t.authorizeRequest(req)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return false, fmt.Errorf("cannot do request: %w", err)
@@ -461,13 +483,18 @@ func (t *Twitch) Close() error {
 }
 
 // SetChatOps configures the chat session for twitch streams
-func (t *Twitch) SetChatOps() error {
+func (t *Twitch) SetChatOps() (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("SetChatOps failed %v", r)
+		}
+	}()
 	t.Lock()
 	defer t.Unlock()
 	if t.c == nil {
 		return ErrNoConnection
 	}
-	err := t.c.WriteMessage(websocket.TextMessage, []byte("CAP REQ :twitch.tv/membership twitch.tv/tags twitch.tv/commands"))
+	err = t.c.WriteMessage(websocket.TextMessage, []byte("CAP REQ :twitch.tv/membership twitch.tv/tags twitch.tv/commands"))
 	if err != nil {
 		return fmt.Errorf("could not pass the cap request %w", err)
 	}
@@ -487,8 +514,77 @@ func (t *Twitch) SetChatOps() error {
 	return nil
 }
 
+// AuthenticateLoop will try very hard to auth and join a channel
+func (t *Twitch) AuthenticateLoop(channelID, channelName string) (err error) {
+	var tr *config.TokenResponse
+	tr, err = t.cfg.GetAuthTokenResponse(channelID, channelName)
+	if err == config.ErrNeedAuthorization {
+		return err
+	}
+	if err != nil {
+		log.Printf("could not get auth token %s", err)
+		return err
+	}
+	err = t.SetChatOps()
+	if err != nil {
+		log.Printf("could not set chat ops: %s", err)
+		return err
+	}
+auth:
+	for {
+		log.Printf("attempting to authenticate")
+		err = t.Authenticate("xlgbot", tr.Token) // twitch seems to ignore this and set it to whatever the user running the bot used to auth
+		if err == ErrAuthFailed {
+			log.Printf("forcing token reauth")
+			err = t.cfg.InvalidateToken(channelID, channelName)
+			if err != nil {
+				log.Printf("could not invalidate old token: %s", err)
+				return err
+			}
+			log.Printf("re-fetching auth token")
+			err := t.Close()
+			if err != nil {
+				log.Fatalf("could not reach twitch: %s", err)
+			}
+			err = t.Open()
+			if err != nil {
+				log.Fatalf("could not reach twitch: %s", err)
+			}
+
+			tr, err = t.cfg.GetAuthTokenResponse(channelID, channelName)
+			if err != nil {
+				log.Printf("could not get auth token %s", err)
+				return err
+			}
+			err = t.SetChatOps()
+			if err != nil {
+				log.Printf("could not set chat ops: %s", err)
+				return err
+			}
+			continue
+		}
+		break auth
+	}
+	err = t.JoinChannels(channelName)
+	if err != nil {
+		log.Printf("could not join channel on twitch: %s", err)
+		return
+	}
+	err = t.SendMessage(channelName, "xlg bot has joined")
+	if err != nil {
+		log.Printf("could not join channel on twitch: %s", err)
+		return
+	}
+	return err
+}
+
 // Authenticate to twitch for the bot name with the given auth token
-func (t *Twitch) Authenticate(name, token string) error {
+func (t *Twitch) Authenticate(name, token string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("authenticate failed %v", r)
+		}
+	}()
 	t.Lock()
 	defer t.Unlock()
 	if t.c == nil {
@@ -498,13 +594,14 @@ func (t *Twitch) Authenticate(name, token string) error {
 		return fmt.Errorf("no valid token provided")
 	}
 	if name == "" {
-		name = "weberr13"
+		name = "xlgbot" // twitch seems to ignore this and set it to whatever the user running the bot used to auth
 	}
 	passCmd := fmt.Sprintf("PASS oauth:%s", token)
-	err := t.c.WriteMessage(websocket.TextMessage, []byte(passCmd))
+	err = t.c.WriteMessage(websocket.TextMessage, []byte(passCmd))
 	if err != nil {
 		return fmt.Errorf("could not pass the authentication %w", err)
 	}
+	log.Printf("attempting to set nick to %s", name)
 	err = t.c.WriteMessage(websocket.TextMessage, []byte("NICK "+name))
 	if err != nil {
 		return fmt.Errorf("could not pass the nick %w", err)
@@ -530,7 +627,12 @@ func (t *Twitch) Authenticate(name, token string) error {
 }
 
 // JoinChannels on an authenticated session
-func (t *Twitch) JoinChannels(channels ...string) error {
+func (t *Twitch) JoinChannels(channels ...string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("join failed %v", r)
+		}
+	}()
 	t.Lock()
 	defer t.Unlock()
 	if t.c == nil {
@@ -546,7 +648,7 @@ func (t *Twitch) JoinChannels(channels ...string) error {
 		channelNames += channels[i]
 	}
 	log.Printf("attempting to join %s", channelNames)
-	err := t.c.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("JOIN %s", channelNames)))
+	err = t.c.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("JOIN %s", channelNames)))
 	if err != nil {
 		return fmt.Errorf("could not get response %w", err)
 	}
@@ -568,13 +670,18 @@ func (t *Twitch) JoinChannels(channels ...string) error {
 }
 
 // SendMessage to a channel TODO: elipsis/fmt args pls
-func (t *Twitch) SendMessage(channelName, msg string) error {
+func (t *Twitch) SendMessage(channelName, msg string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("send failed %v", r)
+		}
+	}()
 	t.Lock()
 	defer t.Unlock()
 	if t.c == nil {
 		return ErrNoConnection
 	}
-	err := t.c.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("PRIVMSG #%s :%s", channelName, msg)))
+	err = t.c.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("PRIVMSG #%s :%s", channelName, msg)))
 	if err != nil {
 		return fmt.Errorf("could not get response %w", err)
 	}
@@ -595,10 +702,14 @@ func (t *Twitch) SendMessage(channelName, msg string) error {
 }
 
 // ReceiveOneMessage waits for a message to be posted to chat
-func (t *Twitch) ReceiveOneMessage() (TwitchMessage, error) {
+func (t *Twitch) ReceiveOneMessage() (msg TwitchMessage, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("receve failed %v", r)
+		}
+	}()
 	t.Lock()
 	defer t.Unlock()
-	msg := TwitchMessage{}
 	if t.c == nil {
 		return msg, ErrNoConnection
 	}

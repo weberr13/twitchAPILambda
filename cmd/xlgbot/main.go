@@ -31,6 +31,65 @@ func init() {
 	ourConfig = config.NewConfig()
 }
 
+// func authenticateLoop(tw *chat.Twitch, channelID, channelName string) (err error) {
+// 	var tr *config.TokenResponse
+// 	tr, err = ourConfig.GetAuthTokenResponse(channelID, channelName)
+// 	if err == config.ErrNeedAuthorization {
+// 		return err
+// 	}
+// 	if err != nil {
+// 		log.Printf("could not get auth token %s", err)
+// 		return err
+// 	}
+// 	err = tw.SetChatOps()
+// 	if err != nil {
+// 		log.Printf("could not set chat ops: %s", err)
+// 		return err
+// 	}
+// 	auth:
+// 	for {
+// 		log.Printf("attempting to authenticate")
+// 		err = tw.Authenticate("weberr13", tr.Token)
+// 		if err == chat.ErrAuthFailed {
+// 			log.Printf("forcing token reauth")
+// 			err = ourConfig.InvalidateToken(channelID, channelName)
+// 			if err != nil {
+// 				log.Printf("could not invalidate old token: %s", err)
+// 				return err
+// 			}
+// 			log.Printf("re-fetching auth token")
+// 			tw, err = chat.NewTwitch(ourConfig)
+// 			if err != nil {
+// 				log.Fatalf("could not reach twitch: %s", err)
+// 			}
+
+// 			tr, err = ourConfig.GetAuthTokenResponse(channelID, channelName)
+// 			if err != nil {
+// 				log.Printf("could not get auth token %s", err)
+// 				return err
+// 			}
+// 			err = tw.SetChatOps()
+// 			if err != nil {
+// 				log.Printf("could not set chat ops: %s", err)
+// 				return err
+// 			}
+// 			continue
+// 		}
+// 		break auth
+// 	}
+// 	err = tw.JoinChannels(channelName)
+// 	if err != nil {
+// 		log.Printf("could not join channel on twitch: %s", err)
+// 		return
+// 	}
+// 	err = tw.SendMessage(channelName, "xlg bot has joined")
+// 	if err != nil {
+// 		log.Printf("could not join channel on twitch: %s", err)
+// 		return
+// 	}
+// 	return err
+// }
+
 func main() {
 	flag.StringVar(&channelName, "channelName", "", "your twitch channel name")
 	flag.StringVar(&channelID, "channelID", "", "your twitch channel ID")
@@ -47,27 +106,6 @@ func main() {
 	if channelID == "" {
 		log.Fatal("please specify channel id")
 	}
-	tw, err := chat.NewTwitch(ourConfig)
-	if err != nil {
-		log.Fatalf("could not reach twitch: %s", err)
-	}
-
-	tr, err := ourConfig.GetAuthTokenResponse(channelID, channelName)
-	if err == config.ErrNeedAuthorization {
-		tw.Close()
-		return
-	}
-	if err != nil {
-		log.Printf("could not get auth token %s", err)
-		tw.Close()
-		return
-	}
-	err = tw.SetChatOps()
-	if err != nil {
-		log.Printf("could not set chat ops: %s", err)
-		tw.Close()
-		return
-	}
 	autoChatter := autochat.NewOpenAI(ourConfig.OpenAIKey)
 	discordBot, err := discord.NewBot(*ourConfig.Discord, autoChatter)
 	if err != nil {
@@ -79,6 +117,7 @@ func main() {
 			log.Printf("could not send discord test message: %s", err)
 		}
 	}
+
 	obsC, err := obs.NewClient(ourConfig.OBS.Password)
 	if err != nil {
 		log.Printf("could not start OBS websocket client: %s", err)
@@ -106,51 +145,56 @@ func main() {
 			}
 		}
 	}
-
-auth:
-	for {
-		log.Printf("attempting to authenticate")
-		err = tw.Authenticate("weberr13", tr.Token)
-		if err == chat.ErrAuthFailed {
-			log.Printf("forcing token reauth")
-			tw.Close()
-			err = ourConfig.InvalidateToken(channelID, channelName)
-			if err != nil {
-				log.Printf("could not invalidate old token: %s", err)
-				return
-			}
-			log.Printf("re-fetching auth token")
-			tw, err = chat.NewTwitch(ourConfig)
-			if err != nil {
-				log.Fatalf("could not reach twitch: %s", err)
-			}
-
-			tr, err = ourConfig.GetAuthTokenResponse(channelID, channelName)
-			if err != nil {
-				log.Printf("could not get auth token %s", err)
-				tw.Close()
-				return
-			}
-			err = tw.SetChatOps()
-			if err != nil {
-				log.Printf("could not set chat ops: %s", err)
-				tw.Close()
-				return
-			}
-			continue
-		}
-		break auth
+	tw, err := chat.NewTwitch(ourConfig)
+	if err != nil {
+		log.Fatalf("could not reach twitch: %s", err)
 	}
 	defer tw.Close()
+	err = tw.AuthenticateLoop(channelID, channelName)
+	if err == config.ErrNeedAuthorization {
+		return
+	}
+	if err != nil {
+		log.Printf("could not get auth token %s", err)
+		return
+	}
 	appContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	wg := &sync.WaitGroup{}
+	recon := func() error {
+		log.Printf("attempting to reconnect to twitch")
+		log.Printf("attempting to close socket")
+		err := tw.Close()
+		if err != nil {
+			log.Printf("closing twitch failed: %s", err)
+			return err
+		}
+		log.Printf("attempting to reopen socket")
+		err = tw.Open()
+		if err != nil {
+			log.Printf("repening twitch failed: %s", err)
+			return err
+		}
+		log.Printf("attempting to authenticate")
+		err = tw.AuthenticateLoop(channelID, channelName)
+		if err == config.ErrNeedAuthorization {
+			return err
+		}
+		if err != nil {
+			log.Printf("could not get auth token %s", err)
+			return err
+		}
+		return nil
+	}
 	discordBot.RunAutoShoutouts(appContext, wg, ourConfig.Discord.GoLiveChannels, func(users []string) (map[string]discord.StreamInfo, error) {
 		m := make(map[string]discord.StreamInfo)
 		twitchChans, err := tw.GetAllStreamInfoForUsers(users)
 		if err != nil {
-			log.Printf("could not get live channels for twitch: %s", err)
-			return m, err
+			log.Printf("could not get live channels for twitch: %s attempting to reconnect", err)
+			err = recon()
+			if err != nil {
+				return m, err
+			}
 		}
 		for user, st := range twitchChans {
 			m[user] = discord.StreamInfo{
@@ -169,18 +213,18 @@ auth:
 		// Can support other platforms
 		return m, nil
 	})
-	err = tw.JoinChannels(channelName)
-	if err != nil {
-		log.Printf("could not join channel on twitch: %s", err)
-		return
-	}
 	knownusers := map[string]string{}
-	err = tw.SendMessage(channelName, "xlg bot has joined")
-	if err != nil {
-		log.Printf("could not join channel on twitch: %s", err)
-		return
-	}
+
 	commands := map[string]func(msg chat.TwitchMessage){
+		"reconnect": func(msg chat.TwitchMessage) {
+			if msg.IsOwner() {
+				err := recon()
+				if err != nil {
+					log.Printf("%s", err)
+				}
+				log.Printf("we should be reconnected")
+			}
+		},
 		"promo": func(msg chat.TwitchMessage) {
 			if msg.IsMod() {
 				s := msg.GetBotCommandArgs()
@@ -434,6 +478,12 @@ readloop:
 		if err == chat.ErrInvalidMsg {
 			log.Printf("could not parse message %s: %s", msg.Raw(), err)
 			continue
+		} else if err != nil {
+			err = recon()
+			if err != nil {
+				log.Printf("%s", err)
+				return
+			}
 		}
 		log.Printf("got %s", msg.String())
 		switch msg.Type() {
