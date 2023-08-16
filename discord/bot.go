@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -298,6 +299,46 @@ func (bc *BotClient) SendMessage(channel string, message string) (*discordgo.Mes
 	bc.Lock()
 	defer bc.Unlock()
 	return bc.client.ChannelMessageSend(channel, message)
+}
+
+// SendPokemonMessage sends a temporary discord message for a pokemon spawn
+func (bc *BotClient) SendPokemonMessage(msg string, channelName string, pcgChannels []string) {
+	// OhMyDog A wild Snubbull appears OhMyDog Catch it using !pokecatch (winners revealed in 90s)
+	i := strings.Index(msg, "A wild ")
+	j := strings.Index(msg, " appears")
+	k := strings.Index(msg, "appears Catch")
+	specialEvent := false
+	if k == -1 {
+		specialEvent = true
+	}
+	if i > 0 && j > i {
+		msg = msg[i+len("A wild ") : j]
+	}
+
+	pokename := msg
+	urlName := regexp.MustCompile(`[^a-z0-9 ]+`).ReplaceAllString(strings.ToLower(msg), "")
+	urlName = strings.ReplaceAll(urlName, " ", "-")
+
+	for _, ch := range pcgChannels {
+		var msgText string
+		if specialEvent {
+			msgText = fmt.Sprintf("A **special event pokemon** [%s](https://www.pokemon.com/us/pokedex/%s) has spawned in %s, go to https://twitch.tv/%s to catch it", pokename, urlName, channelName, channelName)
+		} else {
+			msgText = fmt.Sprintf("A wild [%s](https://www.pokemon.com/us/pokedex/%s) has spawned in %s, go to https://twitch.tv/%s to catch it", pokename, urlName, channelName, channelName)
+		}
+		msg, err := bc.SendMessage(ch, msgText)
+		if err != nil {
+			log.Printf("could not post pokemon spawn: %s", err)
+		} else {
+			go func(chanID, msgID string) {
+				time.Sleep(90 * time.Second)
+				err := bc.DeleteMessage(chanID, msgID)
+				if err != nil {
+					log.Printf("could not delete spawn message: %s", err)
+				}
+			}(msg.ChannelID, msg.ID)
+		}
+	}
 }
 
 // UpdateGoLiveMessage update a golive with new info
