@@ -514,6 +514,27 @@ func (t *Twitch) SetChatOps() (err error) {
 	return nil
 }
 
+// 2023/08/16 00:01:02 attempting to authenticate
+// 2023/08/16 00:01:02 Capactiy
+// 2023/08/16 00:01:02 attempting to authenticate
+// 2023/08/16 00:01:02 attempting to set nick to xlgbot
+// 2023/08/16 00:01:02 failed to authenticate
+// 2023/08/16 00:01:02 forcing token reauth
+// 2023/08/16 00:01:02 re-fetching auth token
+// 2023/08/16 00:01:12 could not set chat ops: could not get response websocket: close 1006 (abnormal closure): unexpected EOF
+// 2023/08/16 00:01:12 could not get auth token could not get response websocket: close 1006 (abnormal closure): unexpected EOF
+// 2023/08/16 00:01:12 could not get live streams: could not get response websocket: close 1006 (abnormal closure): unexpected EOF
+// 2023/08/16 00:01:12 could not get live channels for twitch: got back 401 on get streams command attempting to reconnect
+// 2023/08/16 00:01:12 attempting to reconnect to twitch
+// 2023/08/16 00:01:12 attempting to close socket
+// 2023/08/16 00:01:12 attempting to reopen socket
+// Check your default browser and allow the bot to access your chat and restart.  If your browser does not open visit https://m7tthg2fz8.execute-api.us-east-1.amazonaws.com/?name=weberr13&channel=403503512&type=chat by hand.
+// 2023/08/16 00:01:12 could not get auth token user needs to authorize the app
+// 2023/08/16 00:01:12 user needs to authorize the app
+// 2023/08/16 00:01:12 attempting to authenticate
+// 2023/08/16 00:01:12 Removing commands...
+// Check your default browser and allow the bot to access your chat and restart.  If your browser does not open visit https://m7tthg2fz8.execute-api.us-east-1.amazonaws.com/?name=weberr13&channel=403503512&type=chat by hand.
+
 // AuthenticateLoop will try very hard to auth and join a channel
 func (t *Twitch) AuthenticateLoop(channelID, channelName string) (err error) {
 	var tr *config.TokenResponse
