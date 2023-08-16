@@ -519,7 +519,25 @@ func (t *Twitch) AuthenticateLoop(channelID, channelName string) (err error) {
 	var tr *config.TokenResponse
 	tr, err = t.cfg.GetAuthTokenResponse(channelID, channelName)
 	if err == config.ErrNeedAuthorization {
-		return err
+		retries := 20
+	retry:
+		for ; retries > 0; retries-- {
+			time.Sleep(30 * time.Second)
+			err = t.Close()
+			if err != nil {
+				return err
+			}
+			err = t.Open()
+			if err != nil {
+				return err
+			}
+			tr, err = t.cfg.GetAuthTokenResponse(channelID, channelName)
+			if err == nil {
+				break retry
+			} else if err != config.ErrNeedAuthorization {
+				return err
+			}
+		}
 	}
 	if err != nil {
 		log.Printf("could not get auth token %s", err)
