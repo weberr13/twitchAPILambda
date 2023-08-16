@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	_ "embed" // embed the config in the binary for now
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -94,15 +96,31 @@ type TimerConfig struct {
 	WaitTime string `json:"waittime"`
 	Message  string `json:"message"`
 	Alias    string `json:"alias"`
+	disabled bool `json:"-"`
+	sync.RWMutex
 }
 
 // WaitFor returns a parsed wait time or the minumum time of 5seconds
-func (t TimerConfig) WaitFor() time.Duration {
+func (t *TimerConfig) WaitFor() time.Duration {
 	d, err := time.ParseDuration(t.WaitTime)
 	if err != nil || d < 5*time.Second {
 		return 5 * time.Second
 	}
 	return d
+}
+
+// Enabled is the timer currently enabled
+func (t *TimerConfig) Enabled() bool {
+	t.RLock()
+	defer t.RUnlock()
+	return !t.disabled
+}
+
+// ToggleEnabled will disable/enable the timer
+func (t *TimerConfig) ToggleEnabled() {
+	t.Lock()
+	defer t.Unlock()
+	t.disabled = !t.disabled
 }
 
 // LocalOBS settings ie: scenes and sources
@@ -249,8 +267,8 @@ func (c Configuration) setCommandHeaders(req *http.Request, channelID, channelNa
 }
 
 // InvalidateToken that failed to authenticate previously
-func (c Configuration) InvalidateToken(channelID, channelName string) error {
-	req, err := http.NewRequest(http.MethodGet, c.OurURL+"?cmd=delchattoken", nil)
+func (c Configuration) InvalidateToken(ctx context.Context, channelID, channelName string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.OurURL+"?cmd=delchattoken", nil)
 	if err != nil {
 		return fmt.Errorf("cannot make request: %w", err)
 	}
@@ -267,9 +285,9 @@ func (c Configuration) InvalidateToken(channelID, channelName string) error {
 }
 
 // GetAuthTokenResponse from the backend server
-func (c Configuration) GetAuthTokenResponse(channelID, channelName string) (*TokenResponse, error) {
+func (c Configuration) GetAuthTokenResponse(ctx context.Context, channelID, channelName string) (*TokenResponse, error) {
 	var tr *TokenResponse
-	req, err := http.NewRequest(http.MethodGet, c.OurURL+"?cmd=chattoken", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.OurURL+"?cmd=chattoken", nil)
 	if err != nil {
 		return nil, fmt.Errorf("cannot make request: %w", err)
 	}

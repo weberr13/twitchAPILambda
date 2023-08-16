@@ -218,6 +218,7 @@ type Twitch struct {
 	token        string
 	hostUserInfo *TwitchUserInfo
 	url          url.URL
+	reconLock    *sync.Mutex // double locks are possible >:(
 	sync.RWMutex
 }
 
@@ -228,7 +229,7 @@ func NewTwitch(cfg *config.Configuration) (*Twitch, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Twitch{c: c, cfg: cfg, url: u}, nil
+	return &Twitch{c: c, cfg: cfg, url: u, reconLock: &sync.Mutex{}}, nil
 }
 
 // Open the connection again
@@ -535,14 +536,46 @@ func (t *Twitch) SetChatOps() (err error) {
 // 2023/08/16 00:01:12 Removing commands...
 // Check your default browser and allow the bot to access your chat and restart.  If your browser does not open visit https://m7tthg2fz8.execute-api.us-east-1.amazonaws.com/?name=weberr13&channel=403503512&type=chat by hand.
 
+// Reconnect when the token expires
+func (t *Twitch) Reconnect(ctx context.Context, channelID, channelName string) error {
+	t.reconLock.Lock()
+	defer t.reconLock.Unlock()
+	log.Printf("attempting to reconnect to twitch")
+	log.Printf("attempting to close socket")
+	err := t.Close()
+	if err != nil {
+		log.Printf("closing twitch failed: %s", err)
+		return err
+	}
+	log.Printf("attempting to reopen socket")
+	err = t.Open()
+	if err != nil {
+		log.Printf("repening twitch failed: %s", err)
+		return err
+	}
+	log.Printf("attempting to authenticate")
+	err = t.AuthenticateLoop(ctx, channelID, channelName)
+	if err == config.ErrNeedAuthorization {
+		return err
+	}
+	if err != nil {
+		log.Printf("could not get auth token %s", err)
+		return err
+	}
+	return nil
+}
+
 // AuthenticateLoop will try very hard to auth and join a channel
-func (t *Twitch) AuthenticateLoop(channelID, channelName string) (err error) {
+func (t *Twitch) AuthenticateLoop(ctx context.Context, channelID, channelName string) (err error) {
 	var tr *config.TokenResponse
-	tr, err = t.cfg.GetAuthTokenResponse(channelID, channelName)
+	tr, err = t.cfg.GetAuthTokenResponse(ctx, channelID, channelName)
 	if err == config.ErrNeedAuthorization {
 		retries := 20
 	retry:
 		for ; retries > 0; retries-- {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			time.Sleep(30 * time.Second)
 			err = t.Close()
 			if err != nil {
@@ -552,7 +585,7 @@ func (t *Twitch) AuthenticateLoop(channelID, channelName string) (err error) {
 			if err != nil {
 				return err
 			}
-			tr, err = t.cfg.GetAuthTokenResponse(channelID, channelName)
+			tr, err = t.cfg.GetAuthTokenResponse(ctx, channelID, channelName)
 			if err == nil {
 				break retry
 			} else if err != config.ErrNeedAuthorization {
@@ -575,7 +608,7 @@ auth:
 		err = t.Authenticate("xlgbot", tr.Token) // twitch seems to ignore this and set it to whatever the user running the bot used to auth
 		if err == ErrAuthFailed {
 			log.Printf("forcing token reauth")
-			err = t.cfg.InvalidateToken(channelID, channelName)
+			err = t.cfg.InvalidateToken(ctx, channelID, channelName)
 			if err != nil {
 				log.Printf("could not invalidate old token: %s", err)
 				return err
@@ -590,7 +623,7 @@ auth:
 				log.Fatalf("could not reach twitch: %s", err)
 			}
 
-			tr, err = t.cfg.GetAuthTokenResponse(channelID, channelName)
+			tr, err = t.cfg.GetAuthTokenResponse(ctx, channelID, channelName)
 			if err != nil {
 				log.Printf("could not get auth token %s", err)
 				return err
