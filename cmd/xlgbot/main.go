@@ -191,10 +191,13 @@ func main() {
 		twitchChans, err := tw.GetAllStreamInfoForUsers(users)
 		if err != nil {
 			log.Printf("could not get live channels for twitch: %s attempting to reconnect", err)
-			err = recon()
-			if err != nil {
-				return m, err
-			}
+			// if the bot is only doing discord this will require a recon, if it is also in a channel
+			// trying to recon here will cause a train wreak.  When adding discord only mode fix this
+			// **** FIX ME ***
+			// err = recon()
+			// if err != nil {
+			// 	return m, err
+			// }
 		}
 		for user, st := range twitchChans {
 			m[user] = discord.StreamInfo{
