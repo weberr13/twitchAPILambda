@@ -522,6 +522,5 @@ func main() {
 		cancel()
 	}()
 	mainloop(appContext, wg, tw, discordBot, obsC, autoChatter)
-	cancel() // reentrant
 	wg.Wait()
 }
