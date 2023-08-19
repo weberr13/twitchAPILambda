@@ -186,6 +186,9 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(knownUsers map[string]*discor
 	}
 	log.Printf("live streams of interest are %#v", streams)
 	for user, msg := range knownUsers {
+		if msg == nil {
+			continue
+		}
 		if sinfo, ok := streams[user]; ok {
 			if sinfo.Type != "live" {
 				log.Printf("stream no longer live: remove message with ID: %s in Channel %s, in Guild %s", msg.ID, msg.ChannelID, msg.GuildID)
@@ -343,20 +346,24 @@ func (bc *BotClient) SendPokemonMessage(msg string, channelName string, pcgChann
 
 // UpdateGoLiveMessage update a golive with new info
 func (bc *BotClient) UpdateGoLiveMessage(old *discordgo.Message, title, thumbnail, url, game string) (*discordgo.Message, error) {
+	if old == nil {
+		return nil, fmt.Errorf("cannot update an empty message")
+	}
 	msg := bc.formatGoLive(title, thumbnail, url, game)
 
 	msgEdit := &discordgo.MessageEdit{
 		Content:         &msg.Content,
 		Embeds:          msg.Embeds,
 		Components:      msg.Components,
-		Flags:           old.Flags,
 		AllowedMentions: msg.AllowedMentions,
 		Files:           msg.Files,
-		Attachments:     &old.Attachments,
 		Embed:           msg.Embed,
-		ID:              old.ID,
-		Channel:         old.ChannelID,
 	}
+	msgEdit.Flags = old.Flags
+	msgEdit.Attachments = &old.Attachments
+	msgEdit.ID = old.ID
+	msgEdit.Channel = old.ChannelID
+
 	bc.Lock()
 	defer bc.Unlock()
 	return bc.client.ChannelMessageEditComplex(msgEdit)
