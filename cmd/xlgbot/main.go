@@ -524,3 +524,4 @@ func main() {
 	mainloop(appContext, wg, tw, discordBot, obsC, autoChatter)
 	wg.Wait()
 }
+
