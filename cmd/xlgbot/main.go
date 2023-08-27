@@ -34,6 +34,57 @@ func init() {
 	ourConfig = config.NewConfig()
 }
 
+// RunTimer runs a timer
+func RunTimer(ctx context.Context, t *config.TimerConfig, commands map[string]func(msg chat.TwitchMessage), sendF func(message string), toggleC chan struct{}) {
+	iBig, err := rand.Int(rand.Reader, big.NewInt(600)) // TODO: make this configurable, make a command to turn them off and on for owner to run
+	jitterSec := 1
+	if err == nil {
+		jitterSec = int(iBig.Int64())
+	}
+	log.Printf("timer %#v waiting %d seconds before start", t, jitterSec)
+startloop:
+	for {
+		select {
+		case <-toggleC:
+			log.Printf("currently enabled == %v, togging", t.Enabled())
+			t.ToggleEnabled()
+		case <-time.After(time.Duration(jitterSec) * time.Second):
+			break startloop
+		}
+	}
+	tick := time.NewTimer(t.WaitFor())
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-toggleC:
+			log.Printf("currently enabled == %v, togging", t.Enabled())
+			t.ToggleEnabled()
+		case <-tick.C:
+			if !t.Enabled() {
+				continue
+			}
+			func() {
+				defer tick.Reset(t.WaitFor())
+				log.Printf("running timer %#v", t)
+				if t.Alias != "" {
+					body := t.Alias
+					if len(t.Message) > 0 {
+						body += " " + t.Message
+					}
+					msg := chat.FakeTwitchMessage(body)
+					if f, ok := commands[t.Alias[1:]]; ok {
+						f(msg)
+						return
+					}
+				}
+				sendF(t.Message)
+			}()
+		}
+	}
+}
+
 func contextClose(ctx context.Context, wg *sync.WaitGroup, closer io.Closer) {
 	wg.Add(1)
 	go func() {
@@ -54,6 +105,22 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 		knownusers := map[string]string{}
 
 		commands := map[string]func(msg chat.TwitchMessage){
+			"toggle": func(msg chat.TwitchMessage) {
+				if msg.IsMod() {
+					tm := strings.Fields(msg.GetBotCommandArgs())
+					if len(tm) > 0 {
+						timername := tm[0]
+						log.Printf("toggle %s sending", timername)
+						if _, ok := ourConfig.Twitch.Timers[timername]; ok {
+							if ourConfig.Twitch.Timers[timername].ToggleC != nil {
+								ourConfig.Twitch.Timers[timername].ToggleC <- struct{}{}
+							} else {
+								log.Printf("could not send toggle, no toggle channel")
+							}
+						}
+					}
+				}
+			},
 			"reconnect": func(msg chat.TwitchMessage) {
 				if msg.IsOwner() {
 					err := tw.Reconnect(ctx, channelID, channelName)
@@ -267,46 +334,14 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 			}
 		}
 
-		for _, timer := range ourConfig.Twitch.Timers {
+		for name, timer := range ourConfig.Twitch.Timers {
 			// wg.Add(1)
 			if timer.Alias == "" && timer.Message == "" {
 				log.Printf("got empty timer %v", timer)
 				continue
 			}
-			go func(timerConfig config.TimerConfig) {
-				iBig, err := rand.Int(rand.Reader, big.NewInt(600)) // TODO: make this configurable, make a command to turn them off and on for owner to run
-				jitterSec := 1
-				if err == nil {
-					jitterSec = int(iBig.Int64())
-				}
-				log.Printf("timer %#v waiting %d seconds before start", timerConfig, jitterSec)
-				time.Sleep(time.Duration(jitterSec) * time.Second)
-				tick := time.NewTimer(timerConfig.WaitFor())
-				defer tick.Stop()
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case <-tick.C:
-						func() {
-							defer tick.Reset(timerConfig.WaitFor())
-							log.Printf("running timer %#v", timerConfig)
-							if timerConfig.Alias != "" {
-								body := timerConfig.Alias
-								if len(timerConfig.Message) > 0 {
-									body += " " + timerConfig.Message
-								}
-								msg := chat.FakeTwitchMessage(body)
-								if f, ok := commands[timerConfig.Alias[1:]]; ok {
-									f(msg)
-									return
-								}
-							}
-							_ = tw.SendMessage(channelName, timerConfig.Message)
-						}()
-					}
-				}
-			}(timer)
+			ourConfig.Twitch.Timers[name].ToggleC = make(chan struct{}, 1)
+			go RunTimer(ctx, timer, commands, func(s string) { _ = tw.SendMessage(channelName, s) }, ourConfig.Twitch.Timers[name].ToggleC)
 		}
 
 	readloop:
@@ -524,4 +559,3 @@ func main() {
 	mainloop(appContext, wg, tw, discordBot, obsC, autoChatter)
 	wg.Wait()
 }
-
