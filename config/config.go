@@ -63,7 +63,7 @@ type TwitchConfig struct {
 	ChannelID   string                   `json:"channelID"`
 	YouTube     string                   `json:"youtube"`
 	Socials     []string                 `json:"socials"`
-	Timers      map[string]TimerConfig   `json:"timers"`
+	Timers      map[string]*TimerConfig  `json:"timers"`
 	Commands    map[string]CommandConfig `json:"commands"`
 }
 
@@ -93,10 +93,11 @@ func (cc *CommandConfig) CommandAliases() []string {
 
 // TimerConfig configures a timer
 type TimerConfig struct {
-	WaitTime string `json:"waittime"`
-	Message  string `json:"message"`
-	Alias    string `json:"alias"`
-	disabled bool `json:"-"`
+	WaitTime string        `json:"waittime"`
+	Message  string        `json:"message"`
+	Alias    string        `json:"alias"`
+	ToggleC  chan struct{} `json:"-"`
+	disabled bool          `json:"-"`
 	sync.RWMutex
 }
 
@@ -212,7 +213,7 @@ func NewConfig() *Configuration {
 		}
 	}
 	if ourConfig.Twitch.Timers == nil {
-		ourConfig.Twitch.Timers = map[string]TimerConfig{
+		ourConfig.Twitch.Timers = map[string]*TimerConfig{
 			"xlg": {
 				WaitTime: "30m",
 				Message:  "Join the XLG gaming community at https://discord.gg/xlg",

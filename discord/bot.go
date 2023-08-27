@@ -112,6 +112,7 @@ type BotClient struct {
 	replyChan          map[string]struct{}
 	chat               AutoChatterer
 	registeredCommands []*discordgo.ApplicationCommand
+	token              string
 	sync.RWMutex
 }
 
@@ -120,12 +121,9 @@ func NewBot(conf config.DiscordBotConfig, autochater AutoChatterer) (*BotClient,
 	if conf.Token == "" {
 		return nil, fmt.Errorf("cannot connect")
 	}
-	client, err := discordgo.New("Bot " + conf.Token)
-	if err != nil {
-		return nil, err
-	}
+
 	bc := &BotClient{
-		client:    client,
+		token:     conf.Token,
 		cfg:       conf,
 		chat:      autochater,
 		replyChan: map[string]struct{}{},
@@ -134,30 +132,45 @@ func NewBot(conf config.DiscordBotConfig, autochater AutoChatterer) (*BotClient,
 		bc.replyChan[ch] = struct{}{}
 	}
 	commandHandlers["ask"] = bc.AskCommand
-	bc.client.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+
+	err := bc.Open()
+	if err != nil {
+		return nil, err
+	}
+	return bc, nil
+}
+
+// Open the connection to discord
+func (bc *BotClient) Open() error {
+	client, err := discordgo.New("Bot " + bc.token)
+	if err != nil {
+		return err
+	}
+	client.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if h, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
 			h(s, i)
 		} else {
 			log.Printf("unknownd command %s", i.ApplicationCommandData().Name)
 		}
 	})
-	err = bc.client.Open()
+	err = client.Open()
 	if err != nil {
 		log.Printf("could not connect to discord: %s", err)
-		return nil, err
+		return err
 	}
 	log.Println("Adding commands to discord...")
 	bc.registeredCommands = make([]*discordgo.ApplicationCommand, len(commands))
 	for i, v := range commands {
 		log.Printf("registereing %s", v.Name)
-		cmd, err := bc.client.ApplicationCommandCreate(bc.client.State.User.ID, GuildID, v)
+		cmd, err := client.ApplicationCommandCreate(client.State.User.ID, GuildID, v)
 		if err != nil {
-			log.Panicf("Cannot create '%v' command: %v", v.Name, err)
+			return fmt.Errorf("Cannot create '%v' command: %w", v.Name, err)
 		}
 		bc.registeredCommands[i] = cmd
 		log.Printf("registered %#v", cmd)
 	}
-	return bc, nil
+	bc.client = client
+	return nil
 }
 
 // StreamInfo needed for go-live notifs
@@ -366,7 +379,22 @@ func (bc *BotClient) UpdateGoLiveMessage(old *discordgo.Message, title, thumbnai
 
 	bc.Lock()
 	defer bc.Unlock()
-	return bc.client.ChannelMessageEditComplex(msgEdit)
+	st, err := bc.client.ChannelMessageEditComplex(msgEdit)
+	if err != nil {
+		log.Printf("failure to send channel message, going to try to re-auth once %s", err)
+		err = bc.Close()
+		if err != nil {
+			log.Panicf("tried to reconnect, close failed: %s", err)
+			return nil, err
+		}
+		err = bc.Open()
+		if err != nil {
+			log.Panicf("tried to reconnect, open failed: %s", err)
+			return nil, err
+		}
+		st, err = bc.client.ChannelMessageEditComplex(msgEdit)
+	}
+	return st, err
 }
 
 func (bc *BotClient) formatGoLive(title, thumbnail, url, game string) *discordgo.MessageSend {
@@ -416,13 +444,34 @@ func (bc *BotClient) SendGoLIveMessage(channel string, title, thumbnail, url, ga
 	msg := bc.formatGoLive(title, thumbnail, url, game)
 	bc.Lock()
 	defer bc.Unlock()
-	return bc.client.ChannelMessageSendComplex(channel, msg)
+	if bc.client == nil {
+		return nil, fmt.Errorf("no connection")
+	}
+	st, err := bc.client.ChannelMessageSendComplex(channel, msg)
+	if err != nil {
+		log.Printf("failure to send channel message, going to try to re-auth once %s", err)
+		err = bc.Close()
+		if err != nil {
+			log.Panicf("tried to reconnect, close failed: %s", err)
+			return nil, err
+		}
+		err = bc.Open()
+		if err != nil {
+			log.Panicf("tried to reconnect, open failed: %s", err)
+			return nil, err
+		}
+		st, err = bc.client.ChannelMessageSendComplex(channel, msg)
+	}
+	return st, err
 }
 
 // DeleteMessage deletes a message that we sent
 func (bc *BotClient) DeleteMessage(channelID, messageID string) error {
 	bc.Lock()
 	defer bc.Unlock()
+	if bc.client == nil {
+		return fmt.Errorf("no connection")
+	}
 	return bc.client.ChannelMessageDelete(channelID, messageID)
 }
 
