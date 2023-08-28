@@ -379,6 +379,9 @@ func (bc *BotClient) UpdateGoLiveMessage(old *discordgo.Message, title, thumbnai
 
 	bc.Lock()
 	defer bc.Unlock()
+	if bc.client == nil {
+		return nil, fmt.Errorf("no client found")
+	}
 	st, err := bc.client.ChannelMessageEditComplex(msgEdit)
 	if err != nil {
 		log.Printf("failure to send channel message, going to try to re-auth once %s", err)
@@ -396,6 +399,25 @@ func (bc *BotClient) UpdateGoLiveMessage(old *discordgo.Message, title, thumbnai
 	}
 	return st, err
 }
+
+// panic: runtime error: invalid memory address or nil pointer dereference
+// [signal 0xc0000005 code=0x0 addr=0x2e0 pc=0x5bd6b8]
+
+// goroutine 80 [running]:
+// github.com/bwmarrin/discordgo.(*Session).request(0x0, {0x6a8f21, 0x5}, {0xc000200240, 0x54}, {0x6ad28c, 0x10}, {0xc0000f22c0, 0x281, 0x2c0}, ...)
+//         C:/Users/reweb/go/pkg/mod/github.com/bwmarrin/discordgo@v0.27.1/restapi.go:191 +0x98
+// github.com/bwmarrin/discordgo.(*Session).RequestWithBucketID(0xa2574ec1b98fb493?, {0x6a8f21?, 0x5?}, {0xc000200240?, 0x54?}, {0x649e00?, 0xc000216120?}, {0xc00002c500?, 0x41?}, {0x0, ...})
+//         C:/Users/reweb/go/pkg/mod/github.com/bwmarrin/discordgo@v0.27.1/restapi.go:181 +0x149
+// github.com/bwmarrin/discordgo.(*Session).ChannelMessageEditComplex(0x36f5fe?, 0xc000216120, {0x0, 0x0, 0x0})
+//         C:/Users/reweb/go/pkg/mod/github.com/bwmarrin/discordgo@v0.27.1/restapi.go:1822 +0x374
+// github.com/weberr13/twitchAPILambda/discord.(*BotClient).UpdateGoLiveMessage(0xc00015c100, 0xc000300340, {0xc00022f0e0?, 0xc0002980c0?}, {0xc000200180?, 0xc00007eba0?}, {0xc00069e060?, 0xc0000a42e0?}, {0xc00069e040, 0x19})
+//         C:/cygwin64/home/reweb/src/github.com/twitchAPILambda/discord/bot.go:382 +0x28e
+// github.com/weberr13/twitchAPILambda/discord.(*BotClient).sendShoutoutToChannelForUsers(0x63e020?, 0xc0003a3e60?, {0xc000078640?, 0x13?, 0xc000371e40?}, {0xc00001e8d0, 0x13}, 0xc0000897a0?)
+//         C:/cygwin64/home/reweb/src/github.com/twitchAPILambda/discord/bot.go:215 +0x546
+// github.com/weberr13/twitchAPILambda/discord.(*BotClient).RunAutoShoutouts.func1()
+//         C:/cygwin64/home/reweb/src/github.com/twitchAPILambda/discord/bot.go:265 +0x285
+// created by github.com/weberr13/twitchAPILambda/discord.(*BotClient).RunAutoShoutouts
+//         C:/cygwin64/home/reweb/src/github.com/twitchAPILambda/discord/bot.go:250 +0xfa
 
 func (bc *BotClient) formatGoLive(title, thumbnail, url, game string) *discordgo.MessageSend {
 	height := 108 * 2

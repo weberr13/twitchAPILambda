@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -35,7 +36,8 @@ func init() {
 }
 
 // RunTimer runs a timer
-func RunTimer(ctx context.Context, t *config.TimerConfig, commands map[string]func(msg chat.TwitchMessage), sendF func(message string), toggleC chan struct{}) {
+func RunTimer(ctx context.Context, wg *sync.WaitGroup, t *config.TimerConfig, commands map[string]func(msg chat.TwitchMessage), sendF func(message string), toggleC chan struct{}) {
+	defer wg.Done()
 	iBig, err := rand.Int(rand.Reader, big.NewInt(600)) // TODO: make this configurable, make a command to turn them off and on for owner to run
 	jitterSec := 1
 	if err == nil {
@@ -54,6 +56,27 @@ startloop:
 	}
 	tick := time.NewTimer(t.WaitFor())
 	defer tick.Stop()
+	runt := func() {
+		if !t.Enabled() {
+			return
+		}
+		func() {
+			defer tick.Reset(t.WaitFor())
+			log.Printf("running timer %#v", t)
+			if t.Alias != "" {
+				body := t.Alias
+				if len(t.Message) > 0 {
+					body += " " + t.Message
+				}
+				msg := chat.FakeTwitchMessage(body)
+				if f, ok := commands[t.Alias[1:]]; ok {
+					f(msg)
+					return
+				}
+			}
+			sendF(t.Message)
+		}()
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -61,26 +84,9 @@ startloop:
 		case <-toggleC:
 			log.Printf("currently enabled == %v, togging", t.Enabled())
 			t.ToggleEnabled()
+			runt()
 		case <-tick.C:
-			if !t.Enabled() {
-				continue
-			}
-			func() {
-				defer tick.Reset(t.WaitFor())
-				log.Printf("running timer %#v", t)
-				if t.Alias != "" {
-					body := t.Alias
-					if len(t.Message) > 0 {
-						body += " " + t.Message
-					}
-					msg := chat.FakeTwitchMessage(body)
-					if f, ok := commands[t.Alias[1:]]; ok {
-						f(msg)
-						return
-					}
-				}
-				sendF(t.Message)
-			}()
+			runt()
 		}
 	}
 }
@@ -128,6 +134,20 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 						log.Printf("%s", err)
 					}
 					log.Printf("we should be reconnected")
+				}
+			},
+			"juteboxVolume": func(msg chat.TwitchMessage) {
+				if msg.IsMod() {
+					s := msg.GetBotCommandArgs()
+					val, err := strconv.ParseFloat(s, 64)
+					if err != nil {
+						log.Printf("could not set audio, invalid value: %s", err)
+						return
+					}
+					err = obsC.SetSourceVolume(ourConfig.LocalOBS.MusicSource, val)
+					if err != nil {
+						log.Printf("could not set audio: %s", err)
+					}
 				}
 			},
 			"promo": func(msg chat.TwitchMessage) {
@@ -341,7 +361,8 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 				continue
 			}
 			ourConfig.Twitch.Timers[name].ToggleC = make(chan struct{}, 1)
-			go RunTimer(ctx, timer, commands, func(s string) { _ = tw.SendMessage(channelName, s) }, ourConfig.Twitch.Timers[name].ToggleC)
+			wg.Add(1)
+			go RunTimer(ctx, wg, timer, commands, func(s string) { _ = tw.SendMessage(channelName, s) }, ourConfig.Twitch.Timers[name].ToggleC)
 		}
 
 	readloop:
