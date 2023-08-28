@@ -86,13 +86,21 @@ func (c *Client) SetPromoYoutube(promoSourceName string, videoHash string) error
 		return fmt.Errorf("invalid video link")
 	}
 	if strings.HasPrefix(videoHash, "https://") {
-		if strings.HasPrefix(videoHash, "https://youtu.be") || strings.HasPrefix(videoHash, "https://youtube.com") {
+		if strings.HasPrefix(videoHash, "https://youtu.be") ||
+			strings.HasPrefix(videoHash, "https://youtube.com") ||
+			strings.HasPrefix(videoHash, "https://www.youtube.com") {
 			log.Printf("parsing youtube url")
 			u, err := url.Parse(videoHash)
 			if err == nil {
-				log.Printf("url is %s", u)
-				pathElements := strings.Split(u.Path, "/")
-				videoHash = pathElements[len(pathElements)-1]
+				qp := u.Query()
+				if vParam := qp.Get("v"); vParam != "" {
+					videoHash = vParam
+				} else {
+					pathElements := strings.Split(u.Path, "/")
+					videoHash = pathElements[len(pathElements)-1]
+				}
+				log.Printf("url is %s hash is %s", u, videoHash)
+
 			}
 		} else {
 			return fmt.Errorf("invalid video link")
@@ -122,6 +130,30 @@ func (c *Client) SetPromoYoutube(promoSourceName string, videoHash string) error
 		}
 	}
 	return nil
+}
+
+// SetSourceVolume in a value 0-100
+func (c *Client) SetSourceVolume(name string, val float64) error {
+	_, sources, err := c.GetSourcesForCurrentScene()
+	if err != nil {
+		return err
+	}
+	if val >= 0 {
+		val = -0.01
+	}
+	if val < -60 {
+		val = -60
+	}
+	for _, source := range sources {
+		if source.SourceName == name {
+			_, err := c.c.Inputs.SetInputVolume(&inputs.SetInputVolumeParams{
+				InputName:     source.SourceName,
+				InputVolumeDb: val,
+			})
+			return err
+		}
+	}
+	return fmt.Errorf("could not find source %s", name)
 }
 
 // ToggleSourceAudio will multe/unmute the named audio source
