@@ -8,6 +8,7 @@ import (
 
 	"github.com/andreykaipov/goobs"
 	"github.com/andreykaipov/goobs/api/requests/inputs"
+	"github.com/andreykaipov/goobs/api/requests/record"
 	"github.com/andreykaipov/goobs/api/requests/sceneitems"
 	"github.com/andreykaipov/goobs/api/requests/scenes"
 	"github.com/andreykaipov/goobs/api/typedefs"
@@ -77,6 +78,49 @@ func (c *Client) GetSourcesForCurrentScene() (string, []*typedefs.SceneItem, err
 	}
 
 	return resp.CurrentProgramSceneName, resp2.SceneItems, nil
+}
+
+// GetInputs gets all the inputs
+func (c *Client) GetInputs() ([]*typedefs.Input, error) {
+	resp3, err := c.c.Inputs.GetInputList(&inputs.GetInputListParams{})
+	if err == nil {
+		// for _, input := range resp3.Inputs {
+		// 	log.Printf("input: %s is %v", input.InputName, input.InputKind)
+		// }
+		return resp3.Inputs, nil
+	}
+	return nil, err
+}
+
+// SetPromoTwitch sets a twitch clip as the next promo vid
+func (c *Client) SetPromoTwitch(promoSourceName string, videoURL string) error {
+	// https://clips.twitch.tv/embed?clip=ConsiderateTastyTofuUnSane-5fB2PMSUz8PLjrJS
+	if !strings.HasPrefix(videoURL, "https://clips.twitch.tv/") {
+		return fmt.Errorf("invalid clip link")
+	}
+	_, sources, err := c.GetSourcesForCurrentScene()
+	if err != nil {
+		return err
+	}
+	for _, source := range sources {
+		if source.SourceName == promoSourceName {
+			in, err := c.c.Inputs.GetInputSettings(&inputs.GetInputSettingsParams{
+				InputName: source.SourceName,
+			})
+			if err != nil {
+				return err
+			}
+			log.Printf("input settings %v", *in)
+			in.InputSettings["url"] = videoURL
+			_, err = c.c.Inputs.SetInputSettings(&inputs.SetInputSettingsParams{
+				InputSettings: in.InputSettings,
+				InputName:     source.SourceName,
+			})
+			return err
+			// input settings {browser_source map[reroute_audio:true restart_when_active:true shutdown:true url:https://youtube.com/embed/1Wn6yjwifm4?autoplay=1&modestbranding=1]}
+		}
+	}
+	return nil
 }
 
 // SetPromoYoutube sets the promo video
@@ -170,7 +214,62 @@ func (c *Client) ToggleSourceAudio(name string) error {
 			return err
 		}
 	}
-	return fmt.Errorf("could not find source %s", name)
+	return fmt.Errorf("could not find source %s in %#v", name, sources)
+}
+
+// GetActiveScene gets the name of the active scene
+func (c *Client) GetActiveScene() (string, error) {
+	resp, err := c.c.Scenes.GetSceneList()
+	if err != nil {
+		return "", err
+	}
+	return resp.CurrentProgramSceneName, nil
+}
+
+// PauseRecording will pause the recording if running
+func (c *Client) PauseRecording() error {
+	resp, err := c.c.Record.PauseRecord(&record.PauseRecordParams{})
+	if err != nil {
+		return err
+	}
+	log.Printf("pause returned %v", resp)
+	return nil
+}
+
+// ResumeRecording will resume paused recording
+func (c *Client) ResumeRecording() error {
+	resp, err := c.c.Record.ResumeRecord(&record.ResumeRecordParams{})
+	if err != nil {
+		return err
+	}
+	log.Printf("resume returned %v", resp)
+	return nil
+}
+
+// SetActiveScene sets the active scene to be the given
+func (c *Client) SetActiveScene(name string) error {
+	resp, err := c.c.Scenes.SetCurrentProgramScene(&scenes.SetCurrentProgramSceneParams{
+		SceneName: name,
+	})
+	log.Printf("change scene: %#v", resp)
+	return err
+}
+
+// ToggleInputVolume toggles the mute on an input
+func (c *Client) ToggleInputVolume(name string) error {
+	ins, err := c.GetInputs()
+	if err != nil {
+		return err
+	}
+	for _, input := range ins {
+		if input.InputName == name {
+			_, err := c.c.Inputs.ToggleInputMute(&inputs.ToggleInputMuteParams{
+				InputName: input.InputName,
+			})
+			return err
+		}
+	}
+	return fmt.Errorf("could not find input: %s in %#v", name, ins)
 }
 
 // TogglePromo enables the promo scene if found
@@ -191,6 +290,7 @@ func (c *Client) TogglePromo(promoSourceName string) error {
 			if err != nil {
 				return err
 			}
+			return nil
 		}
 	}
 	return fmt.Errorf("could not find Promo scene: %s", promoSourceName)

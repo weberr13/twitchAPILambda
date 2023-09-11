@@ -43,10 +43,12 @@ func RunTimer(ctx context.Context, wg *sync.WaitGroup, t *config.TimerConfig, co
 	if err == nil {
 		jitterSec = int(iBig.Int64())
 	}
-	log.Printf("timer %#v waiting %d seconds before start", t, jitterSec)
+	// log.Printf("timer %#v waiting %d seconds before start", t, jitterSec)
 startloop:
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-toggleC:
 			log.Printf("currently enabled == %v, togging", t.Enabled())
 			t.ToggleEnabled()
@@ -58,6 +60,7 @@ startloop:
 	defer tick.Stop()
 	runt := func() {
 		if !t.Enabled() {
+			tick.Reset(t.WaitFor())
 			return
 		}
 		func() {
@@ -96,6 +99,7 @@ func contextClose(ctx context.Context, wg *sync.WaitGroup, closer io.Closer) {
 	go func() {
 		defer wg.Done()
 		<-ctx.Done()
+		log.Printf("closing %#v", closer)
 		err := closer.Close()
 		if err != nil {
 			log.Printf("problem closing %#v %s", closer, err)
@@ -103,13 +107,66 @@ func contextClose(ctx context.Context, wg *sync.WaitGroup, closer io.Closer) {
 	}()
 }
 
+// ShoutOutUser keeps track of the RealName of the new users who qualify for shoutouts and when they were last shouted
+type ShoutOutUser struct {
+	RealName     string
+	LastShoutout time.Time
+}
+
+func runAllClips(done chan struct{}, user string, tw *chat.Twitch, obsC *obs.Client) {
+	userInfo, err := tw.GetUserInfo(user)
+	if err != nil {
+		log.Printf("could not get user info, not doing a shoutout: %s", err)
+		return
+	}
+	clips, err := tw.GetClips(userInfo)
+	if err != nil {
+		log.Printf("could not get clips: %s", err)
+		return
+	}
+	for _, clip := range clips {
+		select {
+		case <-done:
+			return
+		default:
+			log.Printf("ready to run clip %v", clip)
+		}
+		// Pick one from above
+		err = obsC.SetPromoTwitch(ourConfig.LocalOBS.PromoSource, clip.EmbeddURL+"&autoplay=true&parent=obs.com")
+		if err != nil {
+			log.Printf("could not set promo: %s", err)
+			return
+		}
+		err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+		if err != nil {
+			log.Printf("could not toggle audio: %s", err)
+		}
+		err = obsC.TogglePromo(ourConfig.LocalOBS.PromoSource)
+		if err != nil {
+			log.Printf("could not run promo: %s", err)
+		}
+		time.Sleep(time.Duration(100*clip.Duration) * time.Second / 100) // duration of clip
+		err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+		if err != nil {
+			log.Printf("could not toggle audio: %s", err)
+		}
+		err := obsC.TogglePromo(ourConfig.LocalOBS.PromoSource)
+		if err != nil {
+			log.Printf("could not run promo: %s", err)
+		}
+	}
+}
+
 func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordBot *discord.BotClient, obsC *obs.Client, autoChatter *autochat.OpenAI) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		var err error
-		knownusers := map[string]string{}
-
+		knownusers := map[string]interface{}{}
+		shoutouts := map[string]interface{}{}
+		clipModeEnabled := false
+		var lastScene string
+		clipC := make(chan struct{}, 2)
 		commands := map[string]func(msg chat.TwitchMessage){
 			"toggle": func(msg chat.TwitchMessage) {
 				if msg.IsMod() {
@@ -150,7 +207,23 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 					}
 				}
 			},
+			"clips": func(msg chat.TwitchMessage) {
+				if msg.IsOwner() {
+					if clipModeEnabled {
+						log.Printf("stopping clips")
+						clipModeEnabled = false
+						clipC <- struct{}{}
+						return
+					}
+					log.Printf("starting clips")
+					clipModeEnabled = true
+					go runAllClips(clipC, channelName, tw, obsC)
+				}
+			},
 			"promo": func(msg chat.TwitchMessage) {
+				if clipModeEnabled {
+					return
+				}
 				if msg.IsMod() {
 					s := msg.GetBotCommandArgs()
 					if s != "" {
@@ -256,9 +329,116 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 					log.Printf("got bye command from %s", msg.GoString())
 				}
 			},
+			"brb": func(msg chat.TwitchMessage) {
+				if msg.IsMod() {
+					err = obsC.ToggleInputVolume(ourConfig.LocalOBS.MicroSource)
+					if err != nil {
+						log.Printf("could not toggle microphone: %s", err)
+					}
+					currentScene, err := obsC.GetActiveScene()
+					if err != nil {
+						log.Printf("could not get active scene: %s", err)
+					}
+					if currentScene == ourConfig.LocalOBS.BRBScene {
+						if lastScene == "" {
+							log.Printf("can't switch back to nothing!!!")
+						} else {
+							err := obsC.SetActiveScene(lastScene)
+							if err == nil {
+								lastScene = ""
+								err = obsC.ResumeRecording()
+								if err != nil {
+									_ = tw.SendMessage(channelName, "warning: trouble resuming recording")
+									log.Printf("could not resume recording: %s", err)
+								}
+							} else {
+								log.Printf("failed to switch scene: %s", err)
+							}
+						}
+					} else {
+						err := obsC.SetActiveScene(ourConfig.LocalOBS.BRBScene)
+						if err == nil {
+							lastScene = currentScene
+							err = obsC.PauseRecording()
+							if err != nil {
+								_ = tw.SendMessage(channelName, "warning: trouble pausing recording")
+								log.Printf("could not pause recording: %s", err)
+							}
+						} else {
+							log.Printf("failed to switch scene: %s", err)
+						}
+					}
+					// switch to BRB scene
+				}
+			},
+			"sso": func(msg chat.TwitchMessage) {
+				if msg.IsMod() {
+					user := msg.GetBotCommandArgs()
+					userSplit := strings.Fields(user)
+					if len(userSplit) > 0 {
+						user = userSplit[0]
+					}
+					if so, ok := shoutouts[user].(ShoutOutUser); ok {
+						so.LastShoutout = time.Now()
+						shoutouts[user] = so
+					} else {
+						shoutouts[user] = ShoutOutUser{LastShoutout: time.Now()}
+					}
+					clips := tw.SuperShoutOut(channelName, user, true)
+					if len(clips) > 0 {
+						iBig, err := rand.Int(rand.Reader, big.NewInt(1+int64(len(clips))))
+						var clip *chat.TwithcClipInfo
+						if err != nil {
+							log.Printf("could not generate random number %s", err)
+							clip = clips[0]
+						} else {
+							log.Printf("playing clip %d", iBig.Int64())
+							clip = clips[iBig.Int64()]
+						}
+						// Pick one from above
+						err = obsC.SetPromoTwitch(ourConfig.LocalOBS.PromoSource, clip.EmbeddURL+"&autoplay=true&parent=obs.com")
+						if err != nil {
+							log.Printf("could not set promo: %s", err)
+							return
+						}
+						err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+						if err != nil {
+							log.Printf("could not toggle audio: %s", err)
+						}
+						err = obsC.TogglePromo(ourConfig.LocalOBS.PromoSource)
+						if err != nil {
+							log.Printf("could not run promo: %s", err)
+						}
+						go func(duration float64) {
+							time.Sleep(time.Duration(100*duration) * time.Second / 100) // duration of clip
+							err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+							if err != nil {
+								log.Printf("could not toggle audio: %s", err)
+							}
+							err := obsC.TogglePromo(ourConfig.LocalOBS.PromoSource)
+							if err != nil {
+								log.Printf("could not run promo: %s", err)
+							}
+						}(clip.Duration)
+					}
+				} else {
+					log.Printf("got so command from %s", msg.GoString())
+				}
+			},
 			"so": func(msg chat.TwitchMessage) {
 				if msg.IsMod() {
-					tw.Shoutout(channelName, msg.GetBotCommandArgs(), true)
+					user := msg.GetBotCommandArgs()
+					userSplit := strings.Fields(user)
+					if len(userSplit) > 0 {
+						user = userSplit[0]
+					}
+					if so, ok := shoutouts[user].(ShoutOutUser); ok {
+						so.LastShoutout = time.Now()
+						shoutouts[user] = so
+					} else {
+						shoutouts[user] = ShoutOutUser{LastShoutout: time.Now()}
+					}
+					tw.Shoutout(channelName, user, true)
 				} else {
 					log.Printf("got so command from %s", msg.GoString())
 				}
@@ -360,11 +540,10 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 				log.Printf("got empty timer %v", timer)
 				continue
 			}
-			ourConfig.Twitch.Timers[name].ToggleC = make(chan struct{}, 1)
+			ourConfig.Twitch.Timers[name].ToggleC = make(chan struct{}, 5)
 			wg.Add(1)
 			go RunTimer(ctx, wg, timer, commands, func(s string) { _ = tw.SendMessage(channelName, s) }, ourConfig.Twitch.Timers[name].ToggleC)
 		}
-
 	readloop:
 		for {
 			if ctx.Err() != nil {
@@ -415,6 +594,17 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 					}
 					log.Printf("command: %s, args: %s", msg.GetBotCommand(), msg.GetBotCommandArgs())
 				default:
+					user := strings.TrimPrefix(msg.User(), ":")
+					// log.Printf("checking for autoshoutout for %s in %#v", user, shoutouts)
+					if so, ok := shoutouts[user].(ShoutOutUser); ok {
+						// log.Printf("last shoutout was %v", so.LastShoutout)
+						if time.Since(so.LastShoutout) > 120*time.Minute {
+							log.Printf("running shoutout for %s", user)
+							tw.Shoutout(channelName, user, false)
+							so.LastShoutout = time.Now()
+							shoutouts[user] = so
+						}
+					}
 					log.Printf(`%s says: "%s"`, msg.DisplayName(), msg.Body())
 				}
 			case chat.PingMessage:
@@ -424,29 +614,27 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 					return
 				}
 			case chat.JoinMessage:
-				shoutouts := map[string]string{}
-				// newchatters := map[string]string{}
 				for k, v := range msg.Users() {
 					if _, ok := knownusers[k]; !ok {
-						shoutouts[k] = v
-					} else {
-						log.Printf("existing user: %s:%s", k, v)
+						// log.Printf("checking %#v for %s", shoutouts, k)
+						if _, ok := shoutouts[k]; !ok {
+							shoutouts[k] = ShoutOutUser{RealName: v}
+						}
+						// } else {
+						// 	log.Printf("existing user: %s:%s", k, v)
 					}
 					knownusers[k] = v
 				}
 				chat.TrimBots(knownusers)
 				chat.TrimBots(shoutouts)
-				for k, v := range shoutouts {
-					log.Printf("new user %s:%s joined", k, v)
-					tw.Shoutout(channelName, k, false)
-				}
 				users := []string{}
 				for k := range knownusers {
 					users = append(users, k)
 				}
 				log.Printf("current users: %v", users)
+				// log.Printf("current shoutouts: %#v", shoutouts)
 			case chat.PartMessage:
-				farewells := map[string]string{}
+				farewells := map[string]interface{}{} // time?
 				for k, v := range msg.Users() {
 					farewells[k] = v
 					delete(knownusers, k)
@@ -517,15 +705,15 @@ func main() {
 		} else {
 			log.Printf("OBS Scenes:\n%s", s)
 		}
-		scene, i, err := obsC.GetSourcesForCurrentScene()
-		if err != nil {
-			log.Printf("could not get obs sources: %s", err)
-		} else {
-			log.Printf("OBS Sources for %s:\n", scene)
-			for _, source := range i {
-				log.Printf("%s: %v", source.SourceName, *source)
-			}
-		}
+		// scene, i, err := obsC.GetSourcesForCurrentScene()
+		// if err != nil {
+		// 	log.Printf("could not get obs sources: %s", err)
+		// } else {
+		// 	log.Printf("OBS Sources for %s:\n", scene)
+		// 	for _, source := range i {
+		// 		log.Printf("%s: %v", source.SourceName, *source)
+		// 	}
+		// }
 	}
 	tw, err := chat.NewTwitch(ourConfig)
 	if err != nil {
