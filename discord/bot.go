@@ -191,14 +191,21 @@ type StreamInfo struct {
 type GetLiveWrapper func([]string) (map[string]StreamInfo, error)
 
 // SINGLE THREADED!
-func (bc *BotClient) sendShoutoutToChannelForUsers(knownUsers map[string]*discordgo.Message, users []string, channel string, getLiveF GetLiveWrapper) {
+func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUsers map[string]*discordgo.Message, users []string, channel string, getLiveF GetLiveWrapper) {
 	streams, err := getLiveF(users)
 	if err != nil {
 		log.Printf("could not get live streams: %s", err)
 		return
 	}
-	log.Printf("live streams of interest are %#v", streams)
+	allUsers := []string{}
+	for k := range streams {
+		allUsers = append(allUsers, k)
+	}
+	log.Printf("live streams of interest are %#v", allUsers)
 	for user, msg := range knownUsers {
+		if ctx.Err() != nil {
+			return
+		}
 		if msg == nil {
 			continue
 		}
@@ -231,6 +238,9 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(knownUsers map[string]*discor
 		}
 	}
 	for user, sinfo := range streams {
+		if ctx.Err() != nil {
+			return
+		}
 		if _, ok := knownUsers[user]; !ok && sinfo.Type == "live" {
 			msg, err := bc.SendGoLIveMessage(channel,
 				fmt.Sprintf(`%s is live playing with %d viewers`, sinfo.UserName, sinfo.ViewerCount),
@@ -256,13 +266,14 @@ func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, c
 			select {
 			case <-ctx.Done():
 				// clean up?
+				log.Printf("shutting down")
 				return
 			case <-timer.C:
 				for channel, users := range chanToUsers {
 					if _, ok := knownUsers[channel]; !ok {
 						knownUsers[channel] = make(map[string]*discordgo.Message)
 					}
-					bc.sendShoutoutToChannelForUsers(knownUsers[channel], users, channel, getLiveF)
+					bc.sendShoutoutToChannelForUsers(ctx, knownUsers[channel], users, channel, getLiveF)
 				}
 			}
 		}
@@ -297,6 +308,7 @@ func (bc *BotClient) Close() error {
 	log.Printf("Closing discord client")
 	err := bc.client.Close()
 	bc.client = nil
+	log.Printf("discord client closed")
 	return err
 }
 
@@ -322,9 +334,10 @@ func (bc *BotClient) SendMessage(channel string, message string) (*discordgo.Mes
 // SendPokemonMessage sends a temporary discord message for a pokemon spawn
 func (bc *BotClient) SendPokemonMessage(msg string, channelName string, pcgChannels []string) {
 	// OhMyDog A wild Snubbull appears OhMyDog Catch it using !pokecatch (winners revealed in 90s)
+	// TwitchLit A wild Yamper appears TwitchLit Catch it using !pokecatch (winners revealed in 90s)
 	i := strings.Index(msg, "A wild ")
 	j := strings.Index(msg, " appears")
-	k := strings.Index(msg, "appears Catch")
+	k := strings.Index(msg, " appears TwitchLit Catch")
 	specialEvent := false
 	if k == -1 {
 		specialEvent = true
@@ -386,18 +399,18 @@ func (bc *BotClient) UpdateGoLiveMessage(old *discordgo.Message, title, thumbnai
 	}
 	st, err := bc.client.ChannelMessageEditComplex(msgEdit)
 	if err != nil {
-		log.Printf("failure to send channel message, going to try to re-auth once %s", err)
-		err = bc.Close()
-		if err != nil {
-			log.Panicf("tried to reconnect, close failed: %s", err)
-			return nil, err
-		}
-		err = bc.Open()
-		if err != nil {
-			log.Panicf("tried to reconnect, open failed: %s", err)
-			return nil, err
-		}
-		st, err = bc.client.ChannelMessageEditComplex(msgEdit)
+		log.Printf("failure to send channel message %s", err)
+		// err = bc.Close()
+		// if err != nil {
+		// 	log.Panicf("tried to reconnect, close failed: %s", err)
+		// 	return nil, err
+		// }
+		// err = bc.Open()
+		// if err != nil {
+		// 	log.Panicf("tried to reconnect, open failed: %s", err)
+		// 	return nil, err
+		// }
+		// st, err = bc.client.ChannelMessageEditComplex(msgEdit)
 	}
 	return st, err
 }
@@ -454,18 +467,18 @@ func (bc *BotClient) SendGoLIveMessage(channel string, title, thumbnail, url, ga
 	}
 	st, err := bc.client.ChannelMessageSendComplex(channel, msg)
 	if err != nil {
-		log.Printf("failure to send channel message, going to try to re-auth once %s", err)
-		err = bc.Close()
-		if err != nil {
-			log.Panicf("tried to reconnect, close failed: %s", err)
-			return nil, err
-		}
-		err = bc.Open()
-		if err != nil {
-			log.Panicf("tried to reconnect, open failed: %s", err)
-			return nil, err
-		}
-		st, err = bc.client.ChannelMessageSendComplex(channel, msg)
+		log.Printf("failure to send channel message %s", err)
+		// err = bc.Close()
+		// if err != nil {
+		// 	log.Panicf("tried to reconnect, close failed: %s", err)
+		// 	return nil, err
+		// }
+		// err = bc.Open()
+		// if err != nil {
+		// 	log.Panicf("tried to reconnect, open failed: %s", err)
+		// 	return nil, err
+		// }
+		// st, err = bc.client.ChannelMessageSendComplex(channel, msg)
 	}
 	return st, err
 }

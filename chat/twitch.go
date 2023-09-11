@@ -138,6 +138,72 @@ func (t *Twitch) Clip() (string, error) {
 	return "", fmt.Errorf("unexpected response from TwitchAPI: %s", string(b))
 }
 
+// SuperShoutOut grabs clips
+func (t *Twitch) SuperShoutOut(channelName string, user string, manual bool) []*TwithcClipInfo {
+	user = strings.TrimPrefix(user, "@")
+	user = strings.ToLower(user)
+	alt := user
+	if a, ok := AlternateUsers()[user]; ok {
+		alt = a
+	}
+
+	userInfo, err := t.GetUserInfo(alt)
+	if err != nil {
+		log.Printf("could not get user info, not doing a shoutout: %s", err)
+		return nil
+	}
+	// log.Printf("%#v", userInfo)
+	chanInfo, err := t.GetChannelInfo(userInfo)
+	if err != nil {
+		log.Printf("could not get channel info, not doing a shoutout: %s", err)
+		return nil
+	}
+	// log.Printf("*** channel info %#v", chanInfo)
+	if chanInfo.GameName == "" || chanInfo.GameName == "<none>" {
+		log.Printf("not shouting out user as they don't stream")
+		return nil
+	}
+	followed, err := t.IFollowThem(userInfo.ID)
+	if err != nil {
+		log.Printf("something whent wrong getting follow info: %s", err)
+		return nil
+	}
+	if !followed && !manual {
+		log.Printf("no auto shoutout for: %#v", chanInfo)
+		return nil
+	}
+	if !followed && manual {
+		log.Printf("I don't follow %#v %#v but shouting out regardless", userInfo, chanInfo)
+	}
+	log.Printf("%s has content warnings: %#v", userInfo.Login, chanInfo.ContentClassificatinLables)
+	gameTitle := `"` + chanInfo.GameName + `"`
+	if len(chanInfo.ContentClassificatinLables) > 0 {
+		gameTitle += "--but be warned that this channel has 18+ content that includes "
+		for i, label := range chanInfo.ContentClassificatinLables {
+			if i > 0 {
+				gameTitle += ", "
+			}
+			gameTitle += eighteenPlusWarnings[label]
+		}
+		gameTitle += "--"
+	}
+	messgeIndex := randIndex(shoutoutMessages)
+
+	// TODO: Text Parsing {{.etc}}
+	str := fmt.Sprintf(shoutoutMessages[messgeIndex], user, alt, gameTitle)
+
+	err = t.SendMessage(channelName, str)
+	if err != nil {
+		log.Printf("could not auto-shoutout %s", user)
+	}
+	clips, err := t.GetClips(userInfo)
+	if err != nil {
+		log.Printf("could not get clips: %s", err)
+		return nil
+	}
+	return clips
+}
+
 // Shoutout a user
 func (t *Twitch) Shoutout(channelName string, user string, manual bool) {
 	user = strings.TrimPrefix(user, "@")
@@ -279,6 +345,26 @@ type TwitchChannelInfo struct {
 	ISBrandedContent           bool     `json:"is_branded_content"`
 }
 
+// TwithcClipInfo get clip response
+type TwithcClipInfo struct {
+	ID        string `json:"id"`        // : "AwkwardHelplessSalamanderSwiftRage",
+	URL       string `json:"url"`       // : "https://clips.twitch.tv/AwkwardHelplessSalamanderSwiftRage",
+	EmbeddURL string `json:"embed_url"` // : "https://clips.twitch.tv/embed?clip=AwkwardHelplessSalamanderSwiftRage",
+	//	"broadcaster_id": "67955580",
+	//	"broadcaster_name": "ChewieMelodies",
+	//	"creator_id": "53834192",
+	//	"creator_name": "BlackNova03",
+	//	"video_id": "205586603",
+	//	"game_id": "488191",
+	//	"language": "en",
+	Title        string    `json:"title"`         //	"title": "babymetal",
+	ViewCount    int       `json:"view_count"`    // : 10,
+	CreatedAt    time.Time `json:"created_at"`    // : "2017-11-30T22:34:18Z",
+	ThumbnailURL string    `json:"thumbnail_url"` //: "https://clips-media-assets.twitch.tv/157589949-preview-480x272.jpg",
+	Duration     float64   `json:"duration"`      //: 28.3
+	//"vod_offset": 480
+}
+
 // GetUserInfo gets the information on a user by login
 func (t *Twitch) GetUserInfo(login string) (*TwitchUserInfo, error) {
 	req, err := http.NewRequest(http.MethodGet, "https://api.twitch.tv/helix/users?login="+login, nil)
@@ -312,6 +398,44 @@ func (t *Twitch) GetUserInfo(login string) (*TwitchUserInfo, error) {
 		return userInfo.Data[0], nil
 	}
 	return nil, fmt.Errorf("user %s not found", login)
+}
+
+// GetClips gets the channel clips
+func (t *Twitch) GetClips(userInfo *TwitchUserInfo) ([]*TwithcClipInfo, error) {
+	if userInfo == nil || userInfo.ID == "" {
+		return nil, fmt.Errorf("no user specified")
+	}
+	req, err := http.NewRequest(http.MethodGet, "https://api.twitch.tv/helix/clips?broadcaster_id="+userInfo.ID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("cannot make request: %w", err)
+	}
+	t.authorizeRequest(req)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cannot do request: %w", err)
+	}
+	if res.Body != nil {
+		defer res.Body.Close()
+	}
+	if res.StatusCode > http.StatusMultipleChoices {
+		return nil, fmt.Errorf("got back %d on get users command", res.StatusCode)
+	}
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	type respData struct {
+		Data []*TwithcClipInfo `json:"data"`
+	}
+	chanInfo := &respData{}
+	err = json.Unmarshal(b, chanInfo)
+	if err != nil {
+		return nil, err
+	}
+	if len(chanInfo.Data) > 0 {
+		return chanInfo.Data, nil
+	}
+	return nil, fmt.Errorf("user %#v not found", userInfo)
 }
 
 // GetChannelInfo gets channel information

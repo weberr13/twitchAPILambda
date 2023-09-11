@@ -128,6 +128,8 @@ func (t *TimerConfig) ToggleEnabled() {
 type LocalOBS struct {
 	MusicSource string `json:"musicSource"`
 	PromoSource string `json:"promoSource"`
+	MicroSource string `json:"micSource"`
+	BRBScene    string `json:"brbScene"`
 }
 
 // Configuration embedded at build time
