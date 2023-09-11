@@ -58,6 +58,7 @@ startloop:
 	defer tick.Stop()
 	runt := func() {
 		if !t.Enabled() {
+			tick.Reset(t.WaitFor())
 			return
 		}
 		func() {
@@ -103,12 +104,19 @@ func contextClose(ctx context.Context, wg *sync.WaitGroup, closer io.Closer) {
 	}()
 }
 
+// ShoutOutUser keeps track of the RealName of the new users who qualify for shoutouts and when they were last shouted
+type ShoutOutUser struct {
+	RealName     string
+	LastShoutout time.Time
+}
+
 func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordBot *discord.BotClient, obsC *obs.Client, autoChatter *autochat.OpenAI) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		var err error
-		knownusers := map[string]string{}
+		knownusers := map[string]interface{}{}
+		shoutouts := map[string]interface{}{}
 
 		commands := map[string]func(msg chat.TwitchMessage){
 			"toggle": func(msg chat.TwitchMessage) {
@@ -258,7 +266,18 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 			},
 			"so": func(msg chat.TwitchMessage) {
 				if msg.IsMod() {
-					tw.Shoutout(channelName, msg.GetBotCommandArgs(), true)
+					user := msg.GetBotCommandArgs()
+					userSplit := strings.Fields(user)
+					if len(userSplit) > 0 {
+						user = userSplit[0]
+					}
+					if so, ok := shoutouts[user].(ShoutOutUser); ok {
+						so.LastShoutout = time.Now()
+						shoutouts[user] = so
+					} else {
+						shoutouts[user] = ShoutOutUser{LastShoutout: time.Now()}
+					}
+					tw.Shoutout(channelName, user, true)
 				} else {
 					log.Printf("got so command from %s", msg.GoString())
 				}
@@ -360,11 +379,10 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 				log.Printf("got empty timer %v", timer)
 				continue
 			}
-			ourConfig.Twitch.Timers[name].ToggleC = make(chan struct{}, 1)
+			ourConfig.Twitch.Timers[name].ToggleC = make(chan struct{}, 5)
 			wg.Add(1)
 			go RunTimer(ctx, wg, timer, commands, func(s string) { _ = tw.SendMessage(channelName, s) }, ourConfig.Twitch.Timers[name].ToggleC)
 		}
-
 	readloop:
 		for {
 			if ctx.Err() != nil {
@@ -415,6 +433,14 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 					}
 					log.Printf("command: %s, args: %s", msg.GetBotCommand(), msg.GetBotCommandArgs())
 				default:
+					user := msg.User()
+					if so, ok := shoutouts[user].(ShoutOutUser); ok {
+						if time.Since(so.LastShoutout) > 120*time.Minute {
+							tw.Shoutout(channelName, user, false)
+							so.LastShoutout = time.Now()
+							shoutouts[user] = so
+						}
+					}
 					log.Printf(`%s says: "%s"`, msg.DisplayName(), msg.Body())
 				}
 			case chat.PingMessage:
@@ -424,11 +450,11 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 					return
 				}
 			case chat.JoinMessage:
-				shoutouts := map[string]string{}
-				// newchatters := map[string]string{}
 				for k, v := range msg.Users() {
 					if _, ok := knownusers[k]; !ok {
-						shoutouts[k] = v
+						if _, ok := shoutouts[k]; !ok {
+							shoutouts[k] = ShoutOutUser{RealName: v}
+						}
 					} else {
 						log.Printf("existing user: %s:%s", k, v)
 					}
@@ -436,17 +462,13 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 				}
 				chat.TrimBots(knownusers)
 				chat.TrimBots(shoutouts)
-				for k, v := range shoutouts {
-					log.Printf("new user %s:%s joined", k, v)
-					tw.Shoutout(channelName, k, false)
-				}
 				users := []string{}
 				for k := range knownusers {
 					users = append(users, k)
 				}
 				log.Printf("current users: %v", users)
 			case chat.PartMessage:
-				farewells := map[string]string{}
+				farewells := map[string]interface{}{} // time?
 				for k, v := range msg.Users() {
 					farewells[k] = v
 					delete(knownusers, k)

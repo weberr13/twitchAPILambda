@@ -68,7 +68,8 @@ func AlternateUsers() map[string]string {
 // Bots we know about
 func Bots() []string {
 	return []string{
-		"nightbot", "kattah", "streamfahrer", "einfachuwe42", "aliceydra", "drapsnatt",
+		"gamers__lounge",
+		"nightbot", "kattah", "streamfahrer", "einfachuwe42", "aliceydra", "drapsnatt", "kofistreambot",
 		"commanderroot", "zkeey", "lurxx", "fwost", "implium", "vlmercy", "rogueg1rl",
 		"pokemoncommunitygame", "0ax2", "arctlco" /*maybe*/, "anotherttvviewer", "morgane2k7", "01aaliyah",
 		"01ella", "own3d", "elbierro", "8hvdes", "7bvllet", "01olivia", "spofoh", "ahahahahhhhahahahahah",
@@ -76,7 +77,7 @@ func Bots() []string {
 }
 
 // TrimBots from a user list
-func TrimBots(users map[string]string) {
+func TrimBots(users map[string]interface{}) {
 	for _, bot := range Bots() {
 		delete(users, bot)
 	}
@@ -514,27 +515,6 @@ func (t *Twitch) SetChatOps() (err error) {
 	}
 	return nil
 }
-
-// 2023/08/16 00:01:02 attempting to authenticate
-// 2023/08/16 00:01:02 Capactiy
-// 2023/08/16 00:01:02 attempting to authenticate
-// 2023/08/16 00:01:02 attempting to set nick to xlgbot
-// 2023/08/16 00:01:02 failed to authenticate
-// 2023/08/16 00:01:02 forcing token reauth
-// 2023/08/16 00:01:02 re-fetching auth token
-// 2023/08/16 00:01:12 could not set chat ops: could not get response websocket: close 1006 (abnormal closure): unexpected EOF
-// 2023/08/16 00:01:12 could not get auth token could not get response websocket: close 1006 (abnormal closure): unexpected EOF
-// 2023/08/16 00:01:12 could not get live streams: could not get response websocket: close 1006 (abnormal closure): unexpected EOF
-// 2023/08/16 00:01:12 could not get live channels for twitch: got back 401 on get streams command attempting to reconnect
-// 2023/08/16 00:01:12 attempting to reconnect to twitch
-// 2023/08/16 00:01:12 attempting to close socket
-// 2023/08/16 00:01:12 attempting to reopen socket
-// Check your default browser and allow the bot to access your chat and restart.  If your browser does not open visit https://m7tthg2fz8.execute-api.us-east-1.amazonaws.com/?name=weberr13&channel=403503512&type=chat by hand.
-// 2023/08/16 00:01:12 could not get auth token user needs to authorize the app
-// 2023/08/16 00:01:12 user needs to authorize the app
-// 2023/08/16 00:01:12 attempting to authenticate
-// 2023/08/16 00:01:12 Removing commands...
-// Check your default browser and allow the bot to access your chat and restart.  If your browser does not open visit https://m7tthg2fz8.execute-api.us-east-1.amazonaws.com/?name=weberr13&channel=403503512&type=chat by hand.
 
 // Reconnect when the token expires
 func (t *Twitch) Reconnect(ctx context.Context, channelID, channelName string) error {
