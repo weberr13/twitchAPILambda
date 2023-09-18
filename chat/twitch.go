@@ -281,10 +281,12 @@ func (t *Twitch) Farewell(channelName string, user string) {
 // Twitch talks to twitch
 type Twitch struct {
 	c            *websocket.Conn
+	p            *websocket.Conn
 	cfg          *config.Configuration
 	token        string
 	hostUserInfo *TwitchUserInfo
 	url          url.URL
+	purl         url.URL
 	reconLock    *sync.Mutex // double locks are possible >:(
 	sync.RWMutex
 }
@@ -292,25 +294,88 @@ type Twitch struct {
 // NewTwitch chat interface
 func NewTwitch(cfg *config.Configuration) (*Twitch, error) {
 	u := url.URL{Scheme: "wss", Host: cfg.GetChatWSS(), Path: "/"}
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	if err != nil {
-		return nil, err
+	pubSubURL := url.URL{Scheme: "wss", Host: cfg.GetPubSubWSS(), Path: "/"}
+	t := &Twitch{
+		cfg:       cfg,
+		url:       u,
+		purl:      pubSubURL,
+		reconLock: &sync.Mutex{},
 	}
-	return &Twitch{c: c, cfg: cfg, url: u, reconLock: &sync.Mutex{}}, nil
+	return t, nil
 }
 
 // Open the connection again
-func (t *Twitch) Open() error {
+func (t *Twitch) Open(ctx context.Context) error {
 	t.Lock()
 	defer t.Unlock()
 	if t.c != nil {
 		return nil
 	}
+	log.Printf("dialing chat")
 	c, _, err := websocket.DefaultDialer.Dial(t.url.String(), nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to reach chat %w", err)
 	}
 	t.c = c
+	log.Printf("setting chat options")
+
+	err = t.setChatOps()
+	if err != nil {
+		log.Printf("could not set chat ops: %s", err)
+		return err
+	}
+
+auth:
+	for {
+		log.Printf("attempting to authenticate chat")
+		err = t.authenticate("xlgbot", t.token) // twitch seems to ignore this and set it to whatever the user running the bot used to auth
+		if err == ErrAuthFailed {
+			log.Printf("forcing token reauth")
+			err = t.cfg.InvalidateToken(ctx, t.cfg.Twitch.ChannelID, t.cfg.Twitch.ChannelName)
+			if err != nil {
+				log.Printf("could not invalidate old token: %s", err)
+				return err
+			}
+			log.Printf("re-fetching auth token")
+
+			tr, err := t.cfg.GetAuthTokenResponse(ctx, t.cfg.Twitch.ChannelID, t.cfg.Twitch.ChannelName)
+			if err != nil {
+				log.Printf("could not get auth token %s", err)
+				return err
+			}
+			t.token = tr.Token
+
+			continue
+		}
+		break auth
+	}
+
+	log.Printf("joining chat")
+	err = t.joinChannels(t.cfg.Twitch.ChannelName)
+	if err != nil {
+		return fmt.Errorf("could not join channel on twitch: %w", err)
+	}
+
+	log.Printf("dialing pubsub")
+	pub, _, err := websocket.DefaultDialer.Dial(t.purl.String(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to reach pubsub %w", err)
+	}
+	t.p = pub
+
+	log.Printf("listening to pubsub topics")
+	err = t.listenToTopics()
+	if err != nil {
+		t.p.Close()
+		t.p = nil
+		return fmt.Errorf("failed to listen to topics %w", err)
+	}
+
+	log.Printf("saying something in chat")
+	err = t.sendMessagePrivate(t.cfg.Twitch.ChannelName, "xlg bot has joined")
+	if err != nil {
+		return fmt.Errorf("could not join channel on twitch: %s", err)
+	}
 	return nil
 }
 
@@ -555,6 +620,48 @@ func (t *Twitch) GetAllStreamInfoForUsers(usernames []string) (map[string]Twitch
 	return m, nil
 }
 
+// ListenTopic describes a pubsub listen topic
+type ListenTopic struct {
+	Topics    []string `json:"topics"`
+	AuthToken string   `json:"auth_token"`
+}
+
+// ListenMessage subscribes to a pubsub topic
+type ListenMessage struct {
+	Type  string      `json:"type"`
+	Nonce string      `json:"nonce,omitempty"`
+	Data  ListenTopic `json:"data"`
+}
+
+func (t *Twitch) listenToTopics() error {
+	if t.p != nil {
+		msg := ListenMessage{
+			Type: "LISTEN",
+			Data: ListenTopic{
+				AuthToken: t.token,
+				Topics: []string{
+					fmt.Sprintf("channel-bits-events-v1.%s", t.cfg.Twitch.ChannelID),
+					fmt.Sprintf("channel-points-channel-v1.%s", t.cfg.Twitch.ChannelID),
+					fmt.Sprintf("channel-subscribe-events-v1.%s", t.cfg.Twitch.ChannelID),
+					fmt.Sprintf("channel-subscribe-events-v1.%s", t.cfg.Twitch.ChannelID),
+				},
+			},
+		}
+		err := t.p.WriteJSON(msg)
+		if err != nil {
+			return fmt.Errorf("could not write subscribe request %w", err)
+		}
+		t, b, err := t.p.ReadMessage()
+		/// parse this???
+		// 		2023/09/17 19:09:53 got 1 {"type":"RESPONSE","error":"","nonce":""}
+		// : %!s(<nil>) subscribing to topics
+
+		log.Printf("got %d %s: %s subscribing to topics", t, string(b), err)
+		return nil
+	}
+	return ErrNoConnection
+}
+
 // IFollowThem checks if a channel is followed by the channel running the bot, used by auto-shoutout
 // https://dev.twitch.tv/docs/api/reference/#get-followed-channels
 func (t *Twitch) IFollowThem(theirID string) (bool, error) {
@@ -605,18 +712,20 @@ func (t *Twitch) Close() error {
 		err = t.c.Close()
 		t.c = nil
 	}
+	if t.p != nil {
+		err = t.p.Close()
+		t.p = nil
+	}
 	return err
 }
 
-// SetChatOps configures the chat session for twitch streams
-func (t *Twitch) SetChatOps() (err error) {
+// setChatOps configures the chat session for twitch streams
+func (t *Twitch) setChatOps() (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("SetChatOps failed %v", r)
 		}
 	}()
-	t.Lock()
-	defer t.Unlock()
 	if t.c == nil {
 		return ErrNoConnection
 	}
@@ -651,14 +760,8 @@ func (t *Twitch) Reconnect(ctx context.Context, channelID, channelName string) e
 		log.Printf("closing twitch failed: %s", err)
 		return err
 	}
-	log.Printf("attempting to reopen socket")
-	err = t.Open()
-	if err != nil {
-		log.Printf("repening twitch failed: %s", err)
-		return err
-	}
 	log.Printf("attempting to authenticate")
-	err = t.AuthenticateLoop(ctx, channelID, channelName)
+	err = t.GetAuthTokens(ctx, channelID, channelName)
 	if err == config.ErrNeedAuthorization {
 		return err
 	}
@@ -666,29 +769,28 @@ func (t *Twitch) Reconnect(ctx context.Context, channelID, channelName string) e
 		log.Printf("could not get auth token %s", err)
 		return err
 	}
+	log.Printf("attempting to reopen socket")
+	err = t.Open(ctx)
+	if err != nil {
+		log.Printf("repening twitch failed: %s", err)
+		return err
+	}
 	return nil
 }
 
-// AuthenticateLoop will try very hard to auth and join a channel
-func (t *Twitch) AuthenticateLoop(ctx context.Context, channelID, channelName string) (err error) {
+// GetAuthTokens will try very hard to get the authentication tokens
+func (t *Twitch) GetAuthTokens(ctx context.Context, channelID, channelName string) (err error) {
 	var tr *config.TokenResponse
 	tr, err = t.cfg.GetAuthTokenResponse(ctx, channelID, channelName)
 	if err == config.ErrNeedAuthorization {
 		retries := 20
 	retry:
 		for ; retries > 0; retries-- {
+			log.Printf("failed to get auth token")
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			time.Sleep(30 * time.Second)
-			err = t.Close()
-			if err != nil {
-				return err
-			}
-			err = t.Open()
-			if err != nil {
-				return err
-			}
 			tr, err = t.cfg.GetAuthTokenResponse(ctx, channelID, channelName)
 			if err == nil {
 				break retry
@@ -701,68 +803,17 @@ func (t *Twitch) AuthenticateLoop(ctx context.Context, channelID, channelName st
 		log.Printf("could not get auth token %s", err)
 		return err
 	}
-	err = t.SetChatOps()
-	if err != nil {
-		log.Printf("could not set chat ops: %s", err)
-		return err
-	}
-auth:
-	for {
-		log.Printf("attempting to authenticate")
-		err = t.Authenticate("xlgbot", tr.Token) // twitch seems to ignore this and set it to whatever the user running the bot used to auth
-		if err == ErrAuthFailed {
-			log.Printf("forcing token reauth")
-			err = t.cfg.InvalidateToken(ctx, channelID, channelName)
-			if err != nil {
-				log.Printf("could not invalidate old token: %s", err)
-				return err
-			}
-			log.Printf("re-fetching auth token")
-			err := t.Close()
-			if err != nil {
-				log.Fatalf("could not reach twitch: %s", err)
-			}
-			err = t.Open()
-			if err != nil {
-				log.Fatalf("could not reach twitch: %s", err)
-			}
-
-			tr, err = t.cfg.GetAuthTokenResponse(ctx, channelID, channelName)
-			if err != nil {
-				log.Printf("could not get auth token %s", err)
-				return err
-			}
-			err = t.SetChatOps()
-			if err != nil {
-				log.Printf("could not set chat ops: %s", err)
-				return err
-			}
-			continue
-		}
-		break auth
-	}
-	err = t.JoinChannels(channelName)
-	if err != nil {
-		log.Printf("could not join channel on twitch: %s", err)
-		return
-	}
-	err = t.SendMessage(channelName, "xlg bot has joined")
-	if err != nil {
-		log.Printf("could not join channel on twitch: %s", err)
-		return
-	}
+	t.token = tr.Token
 	return err
 }
 
-// Authenticate to twitch for the bot name with the given auth token
-func (t *Twitch) Authenticate(name, token string) (err error) {
+// authenticate to twitch for the bot name with the given auth token
+func (t *Twitch) authenticate(name, token string) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("authenticate failed %v", r)
 		}
 	}()
-	t.Lock()
-	defer t.Unlock()
 	if t.c == nil {
 		return ErrNoConnection
 	}
@@ -802,15 +853,13 @@ func (t *Twitch) Authenticate(name, token string) (err error) {
 	return nil
 }
 
-// JoinChannels on an authenticated session
-func (t *Twitch) JoinChannels(channels ...string) (err error) {
+// joinChannels on an authenticated session
+func (t *Twitch) joinChannels(channels ...string) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("join failed %v", r)
 		}
 	}()
-	t.Lock()
-	defer t.Unlock()
 	if t.c == nil {
 		return ErrNoConnection
 	}
@@ -842,6 +891,7 @@ func (t *Twitch) JoinChannels(channels ...string) (err error) {
 	} else {
 		return fmt.Errorf("got unexpected message type in reply")
 	}
+	log.Printf("joined %s", channelNames)
 	return nil
 }
 
@@ -854,6 +904,10 @@ func (t *Twitch) SendMessage(channelName, msg string) (err error) {
 	}()
 	t.Lock()
 	defer t.Unlock()
+	return t.sendMessagePrivate(channelName, msg)
+}
+
+func (t *Twitch) sendMessagePrivate(channelName, msg string) (err error) {
 	if t.c == nil {
 		return ErrNoConnection
 	}
@@ -875,6 +929,95 @@ func (t *Twitch) SendMessage(channelName, msg string) (err error) {
 		fmt.Println("got unexpected message type in reply")
 	}
 	return nil
+}
+
+func ctxSleep(ctx context.Context, d time.Duration) error {
+	select {
+	case <-time.After(d):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// StartPubSubEventHandler is the event loop for twitch pub-sub
+func (t *Twitch) StartPubSubEventHandler(ctx context.Context, wg *sync.WaitGroup) {
+	wg.Add(1)
+	log.Printf("starting pubsub event handler")
+	go func() {
+		defer wg.Done()
+
+		for {
+			if ctx.Err() != nil {
+				log.Printf("shutting down")
+				return
+			}
+			log.Printf("reading pubsub")
+			msg, err := t.recieveOnePubSub()
+			if err != nil {
+				switch err {
+				case ErrNoConnection:
+					err := t.Reconnect(ctx, t.cfg.Twitch.ChannelID, t.cfg.Twitch.ChannelName)
+					if err != nil {
+						log.Printf("got error %s", err.Error())
+						if ctxSleep(ctx, 1*time.Second) != nil {
+							return
+						}
+					}
+				default:
+					log.Printf("got error %s", err.Error())
+					if ctxSleep(ctx, 1*time.Second) != nil {
+						return
+					}
+				}
+				continue
+			}
+			log.Printf("got %#v", msg)
+			switch msg.Type {
+			case "PING":
+				err = t.PongPub(msg)
+				if err != nil {
+					log.Printf("faiure to pong %s", err.Error())
+				}
+				continue
+			case "RECONNECT":
+				log.Printf("got reconnect message")
+				err := t.Reconnect(ctx, t.cfg.Twitch.ChannelID, t.cfg.Twitch.ChannelName)
+				if err != nil {
+					log.Printf("got error %s", err.Error())
+					if ctxSleep(ctx, 1*time.Second) != nil {
+						return
+					}
+				}
+			default:
+				log.Printf("got PubSub unknown message %#v", *msg)
+			}
+		}
+	}()
+}
+
+// recieveOnePubSub gets a message from the pub/sub event channel
+func (t *Twitch) recieveOnePubSub() (msg *TwitchPubSubMessage, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("receve on pubsub failed %v", r)
+		}
+	}()
+	msg = &TwitchPubSubMessage{}
+	if t.p == nil {
+		return nil, ErrNoConnection
+	}
+	msgType, b, err := t.p.ReadMessage()
+	if err != nil {
+		return nil, fmt.Errorf("could not get message %w", err)
+	}
+	switch msgType {
+	case websocket.TextMessage:
+		err = json.Unmarshal(b, &msg)
+		return msg, err
+	default:
+		return nil, fmt.Errorf("got unexpected msg type: %d, %s", msgType, string(b))
+	}
 }
 
 // ReceiveOneMessage waits for a message to be posted to chat
@@ -911,6 +1054,31 @@ func (t *Twitch) Pong(msg TwitchMessage) error {
 		return nil
 	}
 	err := t.c.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("PONG :%s", msg.Body())))
+	if err != nil {
+		return fmt.Errorf("could not send keep alive %w", err)
+	}
+	return nil
+}
+
+// TwitchPubSubMessage is a parsed message from twitch event pub/sub
+type TwitchPubSubMessage struct {
+	Type string                 `json:"type"`
+	Data map[string]interface{} `json:"data,omitempty"`
+}
+
+// PongPub is keep alive
+func (t *Twitch) PongPub(msg *TwitchPubSubMessage) error {
+	t.Lock()
+	defer t.Unlock()
+	if t.c == nil {
+		return ErrNoConnection
+	}
+	if msg.Type != "PING" {
+		return nil
+	}
+	msg.Type = "PONG"
+	b, _ := json.Marshal(msg)
+	err := t.p.WriteMessage(websocket.TextMessage, b)
 	if err != nil {
 		return fmt.Errorf("could not send keep alive %w", err)
 	}

@@ -544,12 +544,16 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 			wg.Add(1)
 			go RunTimer(ctx, wg, timer, commands, func(s string) { _ = tw.SendMessage(channelName, s) }, ourConfig.Twitch.Timers[name].ToggleC)
 		}
+
+		tw.StartPubSubEventHandler(ctx, wg)
+		log.Printf("starting chat handler")
 	readloop:
 		for {
 			if ctx.Err() != nil {
 				log.Printf("got shutdown mesage")
 				return
 			}
+			log.Printf("reading a chat message")
 			msg, err := tw.ReceiveOneMessage()
 			if err == chat.ErrInvalidMsg {
 				log.Printf("could not parse message %s: %s", msg.Raw(), err)
@@ -561,7 +565,6 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 					return
 				}
 			}
-			log.Printf("got %s", msg.String())
 			switch msg.Type() {
 			case chat.PrivateMessage:
 				switch {
@@ -719,8 +722,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("could not reach twitch: %s", err)
 	}
-	contextClose(appContext, wg, tw)
-	err = tw.AuthenticateLoop(appContext, channelID, channelName)
+	err = tw.GetAuthTokens(appContext, channelID, channelName)
 	if err == config.ErrNeedAuthorization {
 		return // we gave up
 	}
@@ -728,6 +730,12 @@ func main() {
 		log.Printf("could not get auth token %s", err)
 		return
 	}
+	err = tw.Open(appContext)
+	if err != nil {
+		log.Fatalf("could not open connection to twitch %s", err)
+	}
+	contextClose(appContext, wg, tw)
+
 	if discordBot != nil && channelName == "weberr13" { // for now this only runs on my machine
 		discordBot.RunAutoShoutouts(appContext, wg, ourConfig.Discord.GoLiveChannels, func(users []string) (map[string]discord.StreamInfo, error) {
 			m := make(map[string]discord.StreamInfo)
@@ -763,8 +771,13 @@ func main() {
 	go func() {
 		sig := <-sigs
 		log.Printf("got signal %s", sig)
+		go func() {
+			time.Sleep(10 * time.Second)
+			os.Exit(1)
+		}()
 		cancel()
 	}()
+	log.Printf("starting main chat loop")
 	mainloop(appContext, wg, tw, discordBot, obsC, autoChatter)
 	wg.Wait()
 }
