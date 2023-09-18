@@ -544,8 +544,69 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 			wg.Add(1)
 			go RunTimer(ctx, wg, timer, commands, func(s string) { _ = tw.SendMessage(channelName, s) }, ourConfig.Twitch.Timers[name].ToggleC)
 		}
-
-		tw.StartPubSubEventHandler(ctx, wg)
+		redemptionHandlers := map[string]func(context.Context, chat.TwitchPointRedemption){
+			"XLG Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
+				log.Printf("got XLG checkin")
+				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+				if err != nil {
+					log.Printf("could not toggle audio: %s", err)
+				}
+				err = obsC.TogglePromo("XLGCheckin") // TODO: put this in the config?
+				if err != nil {
+					log.Printf("could not run xlg checkin: %s", err)
+				}
+				time.Sleep(35 * time.Second) // duration of clip put this in config?
+				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+				if err != nil {
+					log.Printf("could not toggle audio: %s", err)
+				}
+				err := obsC.TogglePromo("XLGCheckin")
+				if err != nil {
+					log.Printf("could not run xlg checkin: %s", err)
+				}
+			},
+			"PooCrew Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
+				log.Printf("got Pooo checkin")
+				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+				if err != nil {
+					log.Printf("could not toggle audio: %s", err)
+				}
+				err = obsC.TogglePromo("PooCrewCheckin") // TODO: put this in the config?
+				if err != nil {
+					log.Printf("could not run xlg checkin: %s", err)
+				}
+				time.Sleep(24 * time.Second) // duration of clip put this in config?
+				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+				if err != nil {
+					log.Printf("could not toggle audio: %s", err)
+				}
+				err := obsC.TogglePromo("PooCrewCheckin")
+				if err != nil {
+					log.Printf("could not run xlg checkin: %s", err)
+				}
+			},
+			"RAD Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
+				log.Printf("got RAD checkin")
+				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+				if err != nil {
+					log.Printf("could not toggle audio: %s", err)
+				}
+				err = obsC.TogglePromo("RADCheckin") // TODO: put this in the config?
+				if err != nil {
+					log.Printf("could not run xlg checkin: %s", err)
+				}
+				time.Sleep(16 * time.Second) // duration of clip put this in config?
+				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+				if err != nil {
+					log.Printf("could not toggle audio: %s", err)
+				}
+				err := obsC.TogglePromo("RADCheckin")
+				if err != nil {
+					log.Printf("could not run xlg checkin: %s", err)
+				}
+			},
+		}
+		tw.StartPubSubEventHandler(ctx, wg, redemptionHandlers)
 		log.Printf("starting chat handler")
 	readloop:
 		for {
