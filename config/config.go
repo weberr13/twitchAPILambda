@@ -24,7 +24,15 @@ var configBytes []byte
 
 var (
 	clipScope = []string{"clips:edit"}
-	chatScope = []string{"clips:edit", "chat:edit", "chat:read", "user:read:follows"}
+	chatScope = []string{
+		"clips:edit",
+		"chat:edit",
+		"chat:read",
+		"user:read:follows",
+		"channel:read:redemptions",
+		"bits:read",
+		"channel:read:subscriptions",
+	}
 	// ErrNeedAuthorization is returned because we need to restart after auth is created
 	ErrNeedAuthorization = fmt.Errorf("user needs to authorize the app")
 )
@@ -193,6 +201,11 @@ func (c Configuration) SetAuthorization(req *http.Request, token string) {
 // GetChatWSS gets the websocket url for the twitch chat server
 func (c Configuration) GetChatWSS() string {
 	return "irc-ws.chat.twitch.tv:443"
+}
+
+// GetPubSubWSS gets the websocket (for pubsub events
+func (c Configuration) GetPubSubWSS() string {
+	return "pubsub-edge.twitch.tv:443"
 }
 
 // NewConfig from the embedded json

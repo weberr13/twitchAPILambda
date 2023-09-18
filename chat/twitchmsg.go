@@ -103,6 +103,7 @@ func (c *TwitchMessage) Parse(b []byte) error {
 		c.users = map[string]string{}
 	}
 	c.raw = string(b)
+	// log.Printf("got raw message: %s", c.raw)
 	c.parsePreamble()
 	switch {
 	case strings.Contains(c.raw, "twitch.tv PRIVMSG #"):
