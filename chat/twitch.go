@@ -361,6 +361,14 @@ auth:
 	if err != nil {
 		return fmt.Errorf("failed to reach pubsub %w", err)
 	}
+	pub.SetPingHandler(func(s string) error {
+		log.Printf(`got "%s" on ping handler`, s)
+		return nil
+	})
+	pub.SetPongHandler(func(s string) error {
+		log.Printf(`got "%s" on pong handler`, s)
+		return nil
+	})
 	t.p = pub
 
 	log.Printf("listening to pubsub topics")
@@ -940,8 +948,58 @@ func ctxSleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// TwitchEventMessage from the pubsub
+type TwitchEventMessage struct {
+	Type string                 `json:"type"`
+	Data map[string]interface{} `json:"data"`
+}
+
+// TwitchPointRedemption from the pubsub
+type TwitchPointRedemption struct {
+	Timestamp  time.Time `json:"timestamp"`
+	Redemption struct {
+		ID   string `json:"id"`
+		User struct {
+			ID          string `json:"id"`
+			Login       string `json:"login"`
+			DisplayName string `json:"display_name"`
+		} `json:"user"`
+		ChannelID  string    `json:"channel_id"`
+		RedeemedAt time.Time `json:"redeemed_at"`
+		Reward     struct {
+			ID        string `json:"id"`
+			ChannelID string `json:"channel_id"`
+			Title     string `json:"title"`
+			// "prompt": "cleanside's finest \n",
+			// "cost": 10,
+			// "is_user_input_required": true,
+			// "is_sub_only": false,
+			// "image": {
+			// "url_1x": "https://static-cdn.jtvnw.net/custom-reward-images/30515034/6ef17bb2-e5ae-432e-8b3f-5ac4dd774668/7bcd9ca8-da17-42c9-800a-2f08832e5d4b/custom-1.png",
+			// "url_2x": "https://static-cdn.jtvnw.net/custom-reward-images/30515034/6ef17bb2-e5ae-432e-8b3f-5ac4dd774668/7bcd9ca8-da17-42c9-800a-2f08832e5d4b/custom-2.png",
+			// "url_4x": "https://static-cdn.jtvnw.net/custom-reward-images/30515034/6ef17bb2-e5ae-432e-8b3f-5ac4dd774668/7bcd9ca8-da17-42c9-800a-2f08832e5d4b/custom-4.png"
+			// },
+			// "default_image": {
+			// "url_1x": "https://static-cdn.jtvnw.net/custom-reward-images/default-1.png",
+			// "url_2x": "https://static-cdn.jtvnw.net/custom-reward-images/default-2.png",
+			// "url_4x": "https://static-cdn.jtvnw.net/custom-reward-images/default-4.png"
+			// },
+			// "background_color": "#00C7AC",
+			// "is_enabled": true,
+			// "is_paused": false,
+			// "is_in_stock": true,
+			// "max_per_stream": { "is_enabled": false, "max_per_stream": 0 },
+			// "should_redemptions_skip_request_queue": true
+		} `json:"reward"`
+		UserInput string `json:"user_input"`
+		Status    string `json:"status"`
+	} `json:"redemption"`
+}
+
 // StartPubSubEventHandler is the event loop for twitch pub-sub
-func (t *Twitch) StartPubSubEventHandler(ctx context.Context, wg *sync.WaitGroup) {
+func (t *Twitch) StartPubSubEventHandler(ctx context.Context, wg *sync.WaitGroup,
+	redemptionHandlers map[string]func(context.Context, TwitchPointRedemption),
+) {
 	wg.Add(1)
 	log.Printf("starting pubsub event handler")
 	go func() {
@@ -972,13 +1030,45 @@ func (t *Twitch) StartPubSubEventHandler(ctx context.Context, wg *sync.WaitGroup
 				}
 				continue
 			}
-			log.Printf("got %#v", msg)
+
 			switch msg.Type {
-			case "PING":
-				err = t.PongPub(msg)
-				if err != nil {
-					log.Printf("faiure to pong %s", err.Error())
+			case "MESSAGE":
+				mmsg := TwitchEventMessage{}
+				topic, ok := msg.Data["topic"].(string)
+				if ok {
+					log.Printf("got message for topic %s", topic)
 				}
+				msgData, ok := msg.Data["message"].(string)
+				if !ok {
+					log.Printf("unexpected event message: %#v", msg.Data)
+					continue
+				}
+				err := json.Unmarshal([]byte(msgData), &mmsg)
+				if err != nil {
+					log.Printf("unexpected event message: %#v %s", msg.Data, err)
+					continue
+				}
+				switch mmsg.Type {
+				case "reward-redeemed":
+					b, _ := json.Marshal(mmsg.Data)
+					redemption := &TwitchPointRedemption{}
+					err := json.Unmarshal(b, redemption)
+					if err != nil {
+						log.Printf("could not parse redemption")
+						continue
+					}
+					f, ok := redemptionHandlers[redemption.Redemption.Reward.Title]
+					if ok {
+						f(ctx, *redemption)
+					} else {
+						log.Printf("got unhandled redemption %#v", redemption)
+					}
+				default:
+					log.Printf("got message unknown %#v", mmsg)
+				}
+				continue
+			case "PONG":
+				log.Printf("got pong")
 				continue
 			case "RECONNECT":
 				log.Printf("got reconnect message")
@@ -991,6 +1081,26 @@ func (t *Twitch) StartPubSubEventHandler(ctx context.Context, wg *sync.WaitGroup
 				}
 			default:
 				log.Printf("got PubSub unknown message %#v", *msg)
+			}
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(120 * time.Second):
+				log.Printf("sending ping")
+				msg := TwitchPubSubMessage{Type: "PING"}
+				if t.p != nil {
+					err := t.p.WriteJSON(msg)
+					if err != nil {
+						log.Printf("could not send ping %s", err)
+						continue
+					}
+				}
 			}
 		}
 	}()
@@ -1064,23 +1174,4 @@ func (t *Twitch) Pong(msg TwitchMessage) error {
 type TwitchPubSubMessage struct {
 	Type string                 `json:"type"`
 	Data map[string]interface{} `json:"data,omitempty"`
-}
-
-// PongPub is keep alive
-func (t *Twitch) PongPub(msg *TwitchPubSubMessage) error {
-	t.Lock()
-	defer t.Unlock()
-	if t.c == nil {
-		return ErrNoConnection
-	}
-	if msg.Type != "PING" {
-		return nil
-	}
-	msg.Type = "PONG"
-	b, _ := json.Marshal(msg)
-	err := t.p.WriteMessage(websocket.TextMessage, b)
-	if err != nil {
-		return fmt.Errorf("could not send keep alive %w", err)
-	}
-	return nil
 }
