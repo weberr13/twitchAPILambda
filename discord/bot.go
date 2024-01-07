@@ -201,22 +201,24 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 	for k := range streams {
 		allUsers = append(allUsers, k)
 	}
-	log.Printf("live streams of interest are %#v", allUsers)
-	for user, msg := range knownUsers {
+	if len(allUsers) > 0 {
+		log.Printf("live streams of interest are %#v", allUsers)
+	}
+	for userchannel, msg := range knownUsers {
 		if ctx.Err() != nil {
 			return
 		}
 		if msg == nil {
 			continue
 		}
-		if sinfo, ok := streams[user]; ok {
+		if sinfo, ok := streams[strings.TrimSuffix(userchannel, channel)]; ok {
 			if sinfo.Type != "live" {
 				log.Printf("stream no longer live: remove message with ID: %s in Channel %s, in Guild %s", msg.ID, msg.ChannelID, msg.GuildID)
 				err := bc.DeleteMessage(msg.ChannelID, msg.ID)
 				if err != nil {
 					log.Printf("could not remove our golive message %s", err)
 				}
-				delete(knownUsers, user)
+				delete(knownUsers, userchannel)
 			} else {
 				log.Printf("updating with the new thumbnail: %s", sinfo.ThumbnailURL)
 				msg, err := bc.UpdateGoLiveMessage(msg,
@@ -225,7 +227,7 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 				if err != nil {
 					log.Printf("could not send msg: %s", err)
 				}
-				knownUsers[user] = msg
+				knownUsers[userchannel] = msg
 			}
 		} else {
 			// remove go live message
@@ -234,14 +236,15 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 			if err != nil {
 				log.Printf("could not remove our golive message %s", err)
 			}
-			delete(knownUsers, user)
+			delete(knownUsers, userchannel)
 		}
 	}
 	for user, sinfo := range streams {
 		if ctx.Err() != nil {
 			return
 		}
-		if _, ok := knownUsers[user]; !ok && sinfo.Type == "live" {
+		if _, ok := knownUsers[user+channel]; !ok && sinfo.Type == "live" {
+			log.Printf("sending I'm live for %s %s", user, channel)
 			msg, err := bc.SendGoLIveMessage(channel,
 				fmt.Sprintf(`%s is live playing with %d viewers`, sinfo.UserName, sinfo.ViewerCount),
 				sinfo.ThumbnailURL, fmt.Sprintf("https://twitch.tv/%s", sinfo.UserLogin), sinfo.GameName)
@@ -249,7 +252,7 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 				log.Printf("could not send msg: %s", err)
 				return
 			}
-			knownUsers[user] = msg
+			knownUsers[user+channel] = msg
 		}
 	}
 }
@@ -259,6 +262,13 @@ func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, c
 	wg.Add(1)
 	go func() {
 		knownUsers := map[string]map[string]*discordgo.Message{}
+		for channel, users := range chanToUsers {
+			if _, ok := knownUsers[channel]; !ok {
+				knownUsers[channel] = make(map[string]*discordgo.Message)
+			}
+			log.Printf("sending shoutouts for channel %s", channel)
+			bc.sendShoutoutToChannelForUsers(ctx, knownUsers[channel], users, channel, getLiveF)
+		}
 		defer wg.Done()
 		timer := time.NewTicker(60 * time.Second) // TODO: configurable?
 		defer timer.Stop()
@@ -273,6 +283,7 @@ func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, c
 					if _, ok := knownUsers[channel]; !ok {
 						knownUsers[channel] = make(map[string]*discordgo.Message)
 					}
+					log.Printf("sending shoutouts for channel %s", channel)
 					bc.sendShoutoutToChannelForUsers(ctx, knownUsers[channel], users, channel, getLiveF)
 				}
 			}

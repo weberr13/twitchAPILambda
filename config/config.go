@@ -70,6 +70,7 @@ type TwitchConfig struct {
 	ChannelName string                   `json:"channelName"`
 	ChannelID   string                   `json:"channelID"`
 	YouTube     string                   `json:"youtube"`
+	Discord     string                   `json:"discord"`
 	Socials     []string                 `json:"socials"`
 	Timers      map[string]*TimerConfig  `json:"timers"`
 	Commands    map[string]CommandConfig `json:"commands"`
@@ -228,12 +229,7 @@ func NewConfig() *Configuration {
 		}
 	}
 	if ourConfig.Twitch.Timers == nil {
-		ourConfig.Twitch.Timers = map[string]*TimerConfig{
-			"xlg": {
-				WaitTime: "30m",
-				Message:  "Join the XLG gaming community at https://discord.gg/xlg",
-			},
-		}
+		ourConfig.Twitch.Timers = map[string]*TimerConfig{}
 	}
 	// TODO: command line arg to find config file?
 	localCfg, err := os.Open("local.cfg")
@@ -251,6 +247,9 @@ func NewConfig() *Configuration {
 				}
 				if localConfig.Twitch.YouTube != "" {
 					ourConfig.Twitch.YouTube = localConfig.Twitch.YouTube
+				}
+				if localConfig.Twitch.Discord != "" {
+					ourConfig.Twitch.Discord = localConfig.Twitch.Discord
 				}
 				if len(localConfig.Twitch.Socials) > 0 {
 					ourConfig.Twitch.Socials = localConfig.Twitch.Socials

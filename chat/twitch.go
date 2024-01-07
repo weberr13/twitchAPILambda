@@ -28,15 +28,15 @@ var (
 	ErrNoConnection = fmt.Errorf("no connection")
 
 	// TODO: Random weighted to one or the other?
-	warewellMessages = []string{
-		"farewell %s, we will miss you! weberrSenaWave",
-		"%s left the stove on and has left the chat weberrSenaWave",
-		"bye %s, later gater weberrSenaWave",
-		"thanks for stopping by %s weberrSenaWave",
-		"adios %s weberrSenaWave",
-		"hasta la vista %s weberrSenaWave",
-		"%s may be trying to lurk but failed to keep the tab open weberrNoahCry",
-	}
+	// warewellMessages = []string{
+	// 	"farewell %s, we will miss you! weberrSenaWave",
+	// 	"%s left the stove on and has left the chat weberrSenaWave",
+	// 	"bye %s, later gater weberrSenaWave",
+	// 	"thanks for stopping by %s weberrSenaWave",
+	// 	"adios %s weberrSenaWave",
+	// 	"hasta la vista %s weberrSenaWave",
+	// 	"%s may be trying to lurk but failed to keep the tab open weberrNoahCry",
+	// }
 	// TODO:
 	// Add 18+ or even 21+ depending on the content classification data we get back
 	// ContentClassificationLabels: "DrugsIntoxication", "ProfanityVulgarity", "ViolentGraphic", "SexualThemes", "MatureGame"
@@ -68,11 +68,11 @@ func AlternateUsers() map[string]string {
 // Bots we know about
 func Bots() []string {
 	return []string{
-		"gamers__lounge",
+		"gamers__lounge", "00rianaa",
 		"nightbot", "kattah", "streamfahrer", "einfachuwe42", "aliceydra", "drapsnatt", "kofistreambot",
 		"commanderroot", "zkeey", "lurxx", "fwost", "implium", "vlmercy", "rogueg1rl",
 		"pokemoncommunitygame", "0ax2", "arctlco" /*maybe*/, "anotherttvviewer", "morgane2k7", "01aaliyah",
-		"01ella", "own3d", "elbierro", "8hvdes", "7bvllet", "01olivia", "spofoh", "ahahahahhhhahahahahah",
+		"01ella", "own3d", "elbierro", "8hvdes", "7bvllet", "01olivia", "spofoh", "ahahahahhhhahahahahah", "d0nk7",
 	}
 }
 
@@ -266,16 +266,16 @@ func (t *Twitch) Shoutout(channelName string, user string, manual bool) {
 
 // Farewell to a user
 func (t *Twitch) Farewell(channelName string, user string) {
-	user = strings.TrimPrefix(user, "@")
-	iBig, err := rand.Int(rand.Reader, big.NewInt(int64(len(warewellMessages))))
-	messgeIndex := 0
-	if err == nil {
-		messgeIndex = int(iBig.Int64())
-	}
-	err = t.SendMessage(channelName, fmt.Sprintf(warewellMessages[messgeIndex], user))
-	if err != nil {
-		log.Printf("could not say goodbye to %s", user)
-	}
+	// user = strings.TrimPrefix(user, "@")
+	// iBig, err := rand.Int(rand.Reader, big.NewInt(int64(len(warewellMessages))))
+	// messgeIndex := 0
+	// if err == nil {
+	// 	messgeIndex = int(iBig.Int64())
+	// }
+	// err = t.SendMessage(channelName, fmt.Sprintf(warewellMessages[messgeIndex], user))
+	// if err != nil {
+	// 	log.Printf("could not say goodbye to %s", user)
+	// }
 }
 
 // Twitch talks to twitch
@@ -362,11 +362,9 @@ auth:
 		return fmt.Errorf("failed to reach pubsub %w", err)
 	}
 	pub.SetPingHandler(func(s string) error {
-		log.Printf(`got "%s" on ping handler`, s)
 		return nil
 	})
 	pub.SetPongHandler(func(s string) error {
-		log.Printf(`got "%s" on pong handler`, s)
 		return nil
 	})
 	t.p = pub
@@ -379,8 +377,7 @@ auth:
 		return fmt.Errorf("failed to listen to topics %w", err)
 	}
 
-	log.Printf("saying something in chat")
-	err = t.sendMessagePrivate(t.cfg.Twitch.ChannelName, "xlg bot has joined")
+	// err = t.sendMessagePrivate(t.cfg.Twitch.ChannelName, "xlg bot has joined")
 	if err != nil {
 		return fmt.Errorf("could not join channel on twitch: %s", err)
 	}
@@ -577,13 +574,13 @@ func (t *Twitch) authorizeRequest(req *http.Request) {
 // GetAllStreamInfoForUsers will give the stream info for the given channel names
 // curl -X GET 'https://api.twitch.tv/helix/streams'
 // https://dev.twitch.tv/docs/api/reference/#get-streams
-func (t *Twitch) GetAllStreamInfoForUsers(usernames []string) (map[string]TwitchStreamInfo, error) {
+func (t *Twitch) GetAllStreamInfoForUsers(usernames []string) (map[string]TwitchStreamInfo, int, error) {
 	m := make(map[string]TwitchStreamInfo)
 	if len(usernames) < 1 {
-		return m, nil
+		return m, http.StatusInternalServerError, nil
 	}
 	if len(usernames) > 100 {
-		return nil, fmt.Errorf("twitch API limits requests to 100 users at a time")
+		return nil, http.StatusInternalServerError, fmt.Errorf("twitch API limits requests to 100 users at a time")
 	}
 	reqString := "https://api.twitch.tv/helix/streams"
 	for i, user := range usernames {
@@ -595,24 +592,26 @@ func (t *Twitch) GetAllStreamInfoForUsers(usernames []string) (map[string]Twitch
 		reqString += "user_login=" + user
 	}
 	reqString += fmt.Sprintf("&first=%d", len(usernames))
-	req, err := http.NewRequest(http.MethodGet, reqString, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqString, nil)
 	if err != nil {
-		return m, fmt.Errorf("cannot make request: %w", err)
+		return m, http.StatusInternalServerError, fmt.Errorf("cannot make request: %w", err)
 	}
 	t.authorizeRequest(req)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return m, fmt.Errorf("cannot do request: %w", err)
+		return m, http.StatusInternalServerError, fmt.Errorf("cannot do request: %w", err)
 	}
 	if res.Body != nil {
 		defer res.Body.Close()
 	}
 	if res.StatusCode > http.StatusMultipleChoices {
-		return m, fmt.Errorf("got back %d on get streams command", res.StatusCode)
+		return m, res.StatusCode, fmt.Errorf("got back %d on get streams command", res.StatusCode)
 	}
 	b, err := io.ReadAll(res.Body)
 	if err != nil {
-		return m, err
+		return m, http.StatusInternalServerError, err
 	}
 	type respData struct {
 		Data []TwitchStreamInfo `json:"data"` // TODO: do we want this to be the real thing?
@@ -620,12 +619,12 @@ func (t *Twitch) GetAllStreamInfoForUsers(usernames []string) (map[string]Twitch
 	streams := &respData{}
 	err = json.Unmarshal(b, streams)
 	if err != nil {
-		return m, err
+		return m, http.StatusInternalServerError, err
 	}
 	for _, stream := range streams.Data {
 		m[stream.UserLogin] = stream
 	}
-	return m, nil
+	return m, http.StatusInternalServerError, nil
 }
 
 // ListenTopic describes a pubsub listen topic
@@ -1068,7 +1067,6 @@ func (t *Twitch) StartPubSubEventHandler(ctx context.Context, wg *sync.WaitGroup
 				}
 				continue
 			case "PONG":
-				log.Printf("got pong")
 				continue
 			case "RECONNECT":
 				log.Printf("got reconnect message")
@@ -1092,7 +1090,6 @@ func (t *Twitch) StartPubSubEventHandler(ctx context.Context, wg *sync.WaitGroup
 			case <-ctx.Done():
 				return
 			case <-time.After(120 * time.Second):
-				log.Printf("sending ping")
 				msg := TwitchPubSubMessage{Type: "PING"}
 				if t.p != nil {
 					err := t.p.WriteJSON(msg)
