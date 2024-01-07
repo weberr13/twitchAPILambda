@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"math/big"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -265,6 +266,13 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 					log.Printf("no youtube configured: %v", ourConfig.Twitch)
 				}
 			},
+			"discord": func(msg chat.TwitchMessage) {
+				if ourConfig.Twitch.Discord != "" {
+					_ = tw.SendMessage(channelName, "Join me on discord at "+ourConfig.Twitch.Discord)
+				} else {
+					log.Printf("no discord configured: %#v", ourConfig.Twitch)
+				}
+			},
 			"socials": func(msg chat.TwitchMessage) {
 				if len(ourConfig.Twitch.Socials) > 0 {
 					s := "When I'm not streaming find me at "
@@ -386,7 +394,7 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 					}
 					clips := tw.SuperShoutOut(channelName, user, true)
 					if len(clips) > 0 {
-						iBig, err := rand.Int(rand.Reader, big.NewInt(1+int64(len(clips))))
+						iBig, err := rand.Int(rand.Reader, big.NewInt(int64(len(clips))))
 						var clip *chat.TwithcClipInfo
 						if err != nil {
 							log.Printf("could not generate random number %s", err)
@@ -583,6 +591,26 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 				err := obsC.TogglePromo("PooCrewCheckin")
 				if err != nil {
 					log.Printf("could not run xlg checkin: %s", err)
+				}
+			},
+			"Panda Pals Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
+				log.Printf("got Panda checkin")
+				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+				if err != nil {
+					log.Printf("could not toggle audio: %s", err)
+				}
+				err = obsC.TogglePromo("PandaPals") // TODO: put this in the config?
+				if err != nil {
+					log.Printf("could not run panda pals checkin: %s", err)
+				}
+				time.Sleep(24 * time.Second) // duration of clip put this in config?
+				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+				if err != nil {
+					log.Printf("could not toggle audio: %s", err)
+				}
+				err := obsC.TogglePromo("PandaPals")
+				if err != nil {
+					log.Printf("could not run panda pals checkin: %s", err)
 				}
 			},
 			"RAD Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
@@ -800,13 +828,37 @@ func main() {
 	if discordBot != nil && channelName == "weberr13" { // for now this only runs on my machine
 		discordBot.RunAutoShoutouts(appContext, wg, ourConfig.Discord.GoLiveChannels, func(users []string) (map[string]discord.StreamInfo, error) {
 			m := make(map[string]discord.StreamInfo)
-			twitchChans, err := tw.GetAllStreamInfoForUsers(users)
+			log.Printf("getting live status for %#v", users)
+			twitchChans, code, err := tw.GetAllStreamInfoForUsers(users)
 			if err != nil {
-				log.Printf("could not get live channels for twitch: %s attempting to reconnect", err)
-				err = tw.Reconnect(appContext, channelID, channelName)
-				if err != nil {
-					return m, err
+				if code == http.StatusUnauthorized {
+					log.Printf("could not get live channels for twitch: %s attempting to reconnect", err)
+					err = tw.Reconnect(appContext, channelID, channelName)
+					if err != nil {
+						return m, err
+					}
+				} else {
+					for i := 0; i < 10; i++ {
+						log.Printf("could not get live channels for twitch: %s not attempting to reconnect", err)
+						twitchChans, code, err = tw.GetAllStreamInfoForUsers(users)
+						if err == nil {
+							break
+						} else if code == http.StatusUnauthorized {
+							log.Printf("could not get live channels for twitch: %s attempting to reconnect", err)
+							err = tw.Reconnect(appContext, channelID, channelName)
+							if err != nil {
+								return m, err
+							}
+						}
+					}
 				}
+			}
+			if err != nil {
+				// err = tw.Reconnect(appContext, channelID, channelName)
+				// if err != nil {
+				// 	return m, err
+				// }
+				return nil, err
 			}
 			for user, st := range twitchChans {
 				m[user] = discord.StreamInfo{
@@ -842,3 +894,13 @@ func main() {
 	mainloop(appContext, wg, tw, discordBot, obsC, autoChatter)
 	wg.Wait()
 }
+
+// panic: runtime error: index out of range [9] with length 9
+
+// goroutine 93 [running]:
+// main.mainloop.func1.15({0x1, {0xc0004ec780, 0x176}, {0xc0004ec780, 0x121}, {0xc0004ec8a2, 0x9}, 0xc0003271a0, {0xc0004ec8df, 0x17}, ...})
+//         C:/cygwin64/home/reweb/src/github.com/twitchAPILambda/cmd/xlgbot/main.go:403 +0x8fd
+// main.mainloop.func1()
+//         C:/cygwin64/home/reweb/src/github.com/twitchAPILambda/cmd/xlgbot/main.go:664 +0x24b5
+// created by main.mainloop
+//         C:/cygwin64/home/reweb/src/github.com/twitchAPILambda/cmd/xlgbot/main.go:162 +0x118
