@@ -73,3 +73,26 @@ func (kv *Badger) Put(key string, value any) error {
 	})
 	return err
 }
+
+// Delete a k/v from the DB
+func (kv *Badger) Delete(key string) error {
+	err := kv.db.Update(func(txn *badger.Txn) error {
+		return txn.Delete([]byte(key))
+	})
+	return err
+}
+
+// PrefixScan for matching keys
+func (kv *Badger) PrefixScan(prefix string) ([]string, error) {
+	found := []string{}
+	err := kv.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		for it.Seek([]byte(prefix)); it.ValidForPrefix([]byte(prefix)); it.Next() {
+			item := it.Item()
+			found = append(found, string(item.Key()))
+		}
+		return nil
+	})
+	return found, err
+}

@@ -20,6 +20,7 @@ import (
 	"github.com/weberr13/twitchAPILambda/autochat"
 	"github.com/weberr13/twitchAPILambda/chat"
 	"github.com/weberr13/twitchAPILambda/config"
+	"github.com/weberr13/twitchAPILambda/db"
 	"github.com/weberr13/twitchAPILambda/discord"
 	"github.com/weberr13/twitchAPILambda/kukoro"
 	"github.com/weberr13/twitchAPILambda/obs"
@@ -158,11 +159,16 @@ func runAllClips(done chan struct{}, user string, tw *chat.Twitch, obsC *obs.Cli
 	}
 }
 
-func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordBot *discord.BotClient, obsC *obs.Client, autoChatter *autochat.OpenAI) {
+func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
+	discordBot *discord.BotClient, obsC *obs.Client, autoChatter *autochat.OpenAI, persist db.Persister,
+) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		var err error
+		wtw := pcg.NewWonderTradeWatcher(persist, tw)
+		wtw.Run(channelName)
+		defer wtw.Close()
 		knownusers := map[string]interface{}{}
 		shoutouts := map[string]interface{}{}
 		clipModeEnabled := false
@@ -431,6 +437,38 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch, discordB
 					}
 				} else {
 					log.Printf("got so command from %s", msg.GoString())
+				}
+			},
+			"wt": func(msg chat.TwitchMessage) {
+				after := 3 * time.Hour
+				override := msg.GetBotCommandArgs()
+				if len(override) > 0 {
+					if override == "delete" {
+						wt := pcg.NewWonderTradeReminder(time.Now(), msg.AtUser())
+						_ = persist.Delete(wt.Key())
+						_ = tw.SendMessage(channelName,
+							fmt.Sprintf("your reminder is removed %s, you are on your own now", wt.Username))
+						return
+					}
+					d, err := time.ParseDuration(override)
+					if err == nil && d < after {
+						after = d
+					}
+				}
+
+				wt := pcg.NewWonderTradeReminder(time.Now(), msg.AtUser(), after)
+				err := persist.Get(wt.Key(), wt)
+				if err == nil {
+					_ = tw.SendMessage(channelName,
+						fmt.Sprintf("your reminder is already set %s, I will remind you around %s", wt.Username, wt.Deadline.Format(time.RFC3339)))
+					return
+				}
+				err = persist.Put(wt.Key(), wt)
+				if err == nil {
+					_ = tw.SendMessage(channelName,
+						fmt.Sprintf("setting wonder trade reminder for %s I will remind you around %s", wt.Username, wt.Deadline.Format(time.RFC3339)))
+				} else {
+					_ = tw.SendMessage(channelName, "I'm sorry I can't do that right now, Dave")
 				}
 			},
 			"so": func(msg chat.TwitchMessage) {
@@ -890,8 +928,14 @@ func main() {
 		}()
 		cancel()
 	}()
+	persist, err := db.NewBadger("./")
+	if err != nil {
+		log.Printf("cannot persist things!!! %s", err)
+		return
+	}
+	defer persist.Close()
 	log.Printf("starting main chat loop")
-	mainloop(appContext, wg, tw, discordBot, obsC, autoChatter)
+	mainloop(appContext, wg, tw, discordBot, obsC, autoChatter, persist)
 	wg.Wait()
 }
 

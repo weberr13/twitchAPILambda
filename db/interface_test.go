@@ -1,15 +1,8 @@
 package db
 
 import (
-	"io"
 	"testing"
 )
-
-type Persister interface {
-	Get(key string, value any) error
-	Put(key string, value any) error
-	io.Closer
-}
 
 func TestKV(t *testing.T) {
 	var p Persister
