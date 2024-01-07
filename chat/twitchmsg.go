@@ -284,6 +284,11 @@ func (c TwitchMessage) User() string {
 	return c.user
 }
 
+// AtUser is the user in a format that twitch likes with an @ sign
+func (c TwitchMessage) AtUser() string {
+	return "@" + strings.TrimPrefix(c.user, ":")
+}
+
 // Users found in Join/Part messages
 func (c TwitchMessage) Users() map[string]string {
 	tmp := map[string]string{}
