@@ -862,7 +862,12 @@ func main() {
 		log.Fatalf("could not open connection to twitch %s", err)
 	}
 	contextClose(appContext, wg, tw)
-
+	persist, err := db.NewBadger("./")
+	if err != nil {
+		log.Printf("cannot persist things!!! %s", err)
+		return
+	}
+	defer persist.Close()
 	if discordBot != nil && channelName == "weberr13" { // for now this only runs on my machine
 		discordBot.RunAutoShoutouts(appContext, wg, ourConfig.Discord.GoLiveChannels, func(users []string) (map[string]discord.StreamInfo, error) {
 			m := make(map[string]discord.StreamInfo)
@@ -914,7 +919,7 @@ func main() {
 			}
 			// Can support other platforms
 			return m, nil
-		})
+		}, persist)
 	}
 
 	sigs := make(chan os.Signal, 1)
@@ -928,23 +933,17 @@ func main() {
 		}()
 		cancel()
 	}()
-	persist, err := db.NewBadger("./")
-	if err != nil {
-		log.Printf("cannot persist things!!! %s", err)
-		return
-	}
-	defer persist.Close()
+
 	log.Printf("starting main chat loop")
 	mainloop(appContext, wg, tw, discordBot, obsC, autoChatter, persist)
 	wg.Wait()
 }
 
-// panic: runtime error: index out of range [9] with length 9
-
-// goroutine 93 [running]:
-// main.mainloop.func1.15({0x1, {0xc0004ec780, 0x176}, {0xc0004ec780, 0x121}, {0xc0004ec8a2, 0x9}, 0xc0003271a0, {0xc0004ec8df, 0x17}, ...})
-//         C:/cygwin64/home/reweb/src/github.com/twitchAPILambda/cmd/xlgbot/main.go:403 +0x8fd
-// main.mainloop.func1()
-//         C:/cygwin64/home/reweb/src/github.com/twitchAPILambda/cmd/xlgbot/main.go:664 +0x24b5
-// created by main.mainloop
-//         C:/cygwin64/home/reweb/src/github.com/twitchAPILambda/cmd/xlgbot/main.go:162 +0x118
+// 2024/01/07 17:01:54 failure to send channel message &discordgo.MessageSend{Content:"",
+// Embeds:[]*discordgo.MessageEmbed{(*discordgo.MessageEmbed)(0xc00044a140)},
+//  TTS:false, Components:[]discordgo.MessageComponent{(*discordgo.ActionsRow)(0xc000008558)},
+//  Files:[]*discordgo.File(nil), AllowedMentions:(*discordgo.MessageAllowedMentions)(nil), Reference:(*discordgo.MessageReference)(nil),
+//  File:(*discordgo.File)(nil),
+//   Embed:(*discordgo.MessageEmbed)(nil)}, HTTP 400 Bad Request,
+//   {"message": "Invalid Form Body", "code": 50035, "errors": {"components": {"0":
+//   {"components": {"0": {"emoji": {"name": {"_errors": [{"code": "BUTTON_COMPONENT_INVALID_EMOJI", "message": "Invalid emoji"}]}}}}}}}}

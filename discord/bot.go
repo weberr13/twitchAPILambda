@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/weberr13/twitchAPILambda/autochat"
 	"github.com/weberr13/twitchAPILambda/config"
+	"github.com/weberr13/twitchAPILambda/db"
 )
 
 var (
@@ -257,11 +258,64 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 	}
 }
 
+// ImLive discord message info
+type ImLive struct {
+	Channel string
+	User    string
+	Message *discordgo.Message
+}
+
+var knownUserPrefix = "imlive-"
+
+// Key for persistence
+func (i ImLive) Key() string {
+	return fmt.Sprintf("%s%s-%s", knownUserPrefix, i.Channel, i.User)
+}
+
+func getKnowUsersMessages(persister db.Persister) map[string]map[string]*discordgo.Message {
+	m := map[string]map[string]*discordgo.Message{}
+	keys, err := persister.PrefixScan(knownUserPrefix)
+	if err != nil {
+		log.Printf("could not read known users in I'm live, starting over: %s", err)
+		return m
+	}
+	for _, key := range keys {
+		im := &ImLive{}
+		err = persister.Get(key, im)
+		if err != nil {
+			log.Printf("could not read known user %s in I'm live, skipping: %s", key, err)
+			continue
+		}
+		_, ok := m[im.Channel]
+		if !ok {
+			m[im.Channel] = make(map[string]*discordgo.Message)
+		}
+		m[im.Channel][im.User] = im.Message
+	}
+	return m
+}
+
+func saveKnowUsersMessages(m map[string]map[string]*discordgo.Message, persister db.Persister) {
+	for ch, msgs := range m {
+		for user, msg := range msgs {
+			im := &ImLive{
+				Channel: ch,
+				User:    user,
+				Message: msg,
+			}
+			err := persister.Put(im.Key(), im)
+			if err != nil {
+				log.Printf("could not save known user %v in I'm live %s", im, err)
+			}
+		}
+	}
+}
+
 // RunAutoShoutouts will start an asyncronous runner that manages shoutouts
-func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, chanToUsers map[string][]string, getLiveF GetLiveWrapper) {
+func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, chanToUsers map[string][]string, getLiveF GetLiveWrapper, persister db.Persister) {
 	wg.Add(1)
 	go func() {
-		knownUsers := map[string]map[string]*discordgo.Message{}
+		knownUsers := getKnowUsersMessages(persister)
 		for channel, users := range chanToUsers {
 			if _, ok := knownUsers[channel]; !ok {
 				knownUsers[channel] = make(map[string]*discordgo.Message)
@@ -269,6 +323,7 @@ func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, c
 			log.Printf("sending shoutouts for channel %s", channel)
 			bc.sendShoutoutToChannelForUsers(ctx, knownUsers[channel], users, channel, getLiveF)
 		}
+		saveKnowUsersMessages(knownUsers, persister)
 		defer wg.Done()
 		timer := time.NewTicker(60 * time.Second) // TODO: configurable?
 		defer timer.Stop()
@@ -286,6 +341,7 @@ func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, c
 					log.Printf("sending shoutouts for channel %s", channel)
 					bc.sendShoutoutToChannelForUsers(ctx, knownUsers[channel], users, channel, getLiveF)
 				}
+				saveKnowUsersMessages(knownUsers, persister)
 			}
 		}
 	}()
@@ -459,6 +515,9 @@ func (bc *BotClient) formatGoLive(title, thumbnail, url, game string) *discordgo
 						Style: discordgo.LinkButton,
 						Label: "Watch Now",
 						URL:   url,
+						Emoji: discordgo.ComponentEmoji{
+							Name: "👀",
+						},
 					},
 				},
 			},
@@ -478,7 +537,7 @@ func (bc *BotClient) SendGoLIveMessage(channel string, title, thumbnail, url, ga
 	}
 	st, err := bc.client.ChannelMessageSendComplex(channel, msg)
 	if err != nil {
-		log.Printf("failure to send channel message %s", err)
+		log.Printf("failure to send channel message %#v, %s", msg, err)
 		// err = bc.Close()
 		// if err != nil {
 		// 	log.Panicf("tried to reconnect, close failed: %s", err)
