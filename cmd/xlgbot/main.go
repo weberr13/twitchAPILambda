@@ -807,7 +807,13 @@ func main() {
 	autoChatter := autochat.NewOpenAI(ourConfig.OpenAIKey)
 	var discordBot *discord.BotClient
 	var err error
-	discordBot, err = discord.NewBot(*ourConfig.Discord, autoChatter)
+	persist, err := db.NewBadger("./")
+	if err != nil {
+		log.Printf("cannot persist things!!! %s", err)
+		return
+	}
+	defer persist.Close()
+	discordBot, err = discord.NewBot(*ourConfig.Discord, autoChatter, persist)
 	if err != nil {
 		log.Printf("not starting discord bot: %s", err)
 	} else {
@@ -862,12 +868,7 @@ func main() {
 		log.Fatalf("could not open connection to twitch %s", err)
 	}
 	contextClose(appContext, wg, tw)
-	persist, err := db.NewBadger("./")
-	if err != nil {
-		log.Printf("cannot persist things!!! %s", err)
-		return
-	}
-	defer persist.Close()
+
 	if discordBot != nil && channelName == "weberr13" { // for now this only runs on my machine
 		discordBot.RunAutoShoutouts(appContext, wg, ourConfig.Discord.GoLiveChannels, func(users []string) (map[string]discord.StreamInfo, error) {
 			m := make(map[string]discord.StreamInfo)

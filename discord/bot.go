@@ -34,10 +34,155 @@ var (
 				},
 			},
 		},
+		{
+			Name:        "expgive",
+			Description: "give a user experience points",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "user",
+					Description: "username to change",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "val",
+					Description: "number of points to give the user",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "expcheck",
+			Description: "get a user's level and exp info",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "user",
+					Description: "username to change",
+					Required:    true,
+				},
+			},
+		},
 	}
 
 	commandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){}
 )
+
+func getOptionsMap(commandData discordgo.ApplicationCommandInteractionData) map[string]*discordgo.ApplicationCommandInteractionDataOption {
+	options := commandData.Options
+	optionMap := make(map[string]*discordgo.ApplicationCommandInteractionDataOption, len(options))
+	for _, opt := range options {
+		optionMap[opt.Name] = opt
+	}
+	return optionMap
+}
+
+func getRequestor(i *discordgo.InteractionCreate) string {
+	user := "default"
+	if i.User != nil {
+		user = i.User.Username
+	} else if i.Member != nil {
+		if i.Member.User != nil {
+			user = i.Member.User.Username
+		} else if i.Member.Nick != "" {
+			user = i.Member.Nick
+		}
+	}
+	log.Printf("determined user of requestor is %s", user)
+	return user
+}
+
+// TODO: make this configurable
+var authorizedDMs = map[string]struct{}{
+	"weberr13": {}, "xero2772": {},
+}
+
+// GiveEXP callback
+func (bc *BotClient) GiveEXP(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	opts := getOptionsMap(i.ApplicationCommandData())
+	user := getRequestor(i)
+	_, ok := authorizedDMs[user]
+	if !ok {
+		respondToCommand(s, i, "I can't let you do that, Dave")
+		log.Printf("user %s is trying to do exp commands, do they need a hammer?", user)
+		return
+	}
+	changeuser, ok := opts["user"]
+	if !ok {
+		respondToCommand(s, i, "no user specified, what do you want to do?")
+		return
+	}
+	value, ok := opts["val"]
+	if !ok {
+		respondToCommand(s, i, "no value specified, what do you want?")
+		return
+	}
+
+	prof := NewUser(i.GuildID, changeuser.StringValue())
+	err := bc.persistence.Get(prof.Key(), prof)
+	switch err {
+	case db.ErrNotFound:
+		fallthrough
+	case nil:
+		prof.AddExp(int(value.IntValue()))
+		err = bc.persistence.Put(prof.Key(), prof)
+		if err != nil {
+			respondToCommand(s, i, fmt.Sprintf("something went terribly wrong, send this to weberr13 %s", err))
+			return
+		}
+		respondToCommand(s, i, fmt.Sprintf("user %s is level %d with %d exp", prof.Name, prof.Level(), prof.CurrentExp))
+	default:
+		respondToCommand(s, i, fmt.Sprintf("something went terribly wrong, send this to weberr13 %s", err))
+		return
+	}
+}
+
+// CheckUserEXP callback
+func (bc *BotClient) CheckUserEXP(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	opts := getOptionsMap(i.ApplicationCommandData())
+	user := getRequestor(i)
+	changeuser, ok := opts["user"]
+	if !ok {
+		respondToCommand(s, i, "no user specified, what do you want to do?")
+		return
+	}
+	_, ok = authorizedDMs[user]
+	if !ok && user != changeuser.Name {
+		respondToCommand(s, i, "I can't let you do that, Dave")
+		log.Printf("user %s is trying spy on other people, do they need a hammer?", user)
+		return
+	}
+	prof := NewUser(i.GuildID, changeuser.StringValue())
+	err := bc.persistence.Get(prof.Key(), prof)
+	switch err {
+	case db.ErrNotFound:
+		err = bc.persistence.Put(prof.Key(), prof)
+		if err != nil {
+			respondToCommand(s, i, fmt.Sprintf("something went terribly wrong, send this to weberr13 %s", err))
+			return
+		}
+		fallthrough
+	case nil:
+		respondToCommand(s, i, fmt.Sprintf("user %s is level %d with %d exp", prof.Name, prof.Level(), prof.CurrentExp))
+		return
+	default:
+		respondToCommand(s, i, fmt.Sprintf("something went terribly wrong, send this to weberr13 %s", err))
+		return
+	}
+}
+
+func respondToCommand(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: content,
+		},
+	})
+	if err != nil {
+		log.Printf("failed to send message: %s", err)
+	}
+}
 
 // AskCommand uses openai
 func (bc *BotClient) AskCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -45,23 +190,8 @@ func (bc *BotClient) AskCommand(s *discordgo.Session, i *discordgo.InteractionCr
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		options := i.ApplicationCommandData().Options
-		// Or convert the slice into a map
-		optionMap := make(map[string]*discordgo.ApplicationCommandInteractionDataOption, len(options))
-		for _, opt := range options {
-			optionMap[opt.Name] = opt
-		}
-		user := "default"
-		if i.User != nil {
-			user = i.User.Username
-		} else if i.Member != nil {
-			if i.Member.User != nil {
-				user = i.Member.User.Username
-			} else if i.Member.Nick != "" {
-				user = i.Member.Nick
-			}
-		}
-		log.Printf("determined user of requestor is %s", user)
+		optionMap := getOptionsMap(i.ApplicationCommandData())
+		user := getRequestor(i)
 
 		resp, err := bc.chat.CreateCompletion(ctx, optionMap["question"].StringValue(), autochat.WithRateLimit(user, 5*time.Minute))
 		if err != nil {
@@ -74,30 +204,14 @@ func (bc *BotClient) AskCommand(s *discordgo.Session, i *discordgo.InteractionCr
 	}()
 	select {
 	case <-time.After(2500 * time.Millisecond):
-		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "this is taking a while, I'll get back to you on that",
-			},
-		})
-		if err != nil {
-			log.Printf("failed to send message: %s", err)
-		}
+		respondToCommand(s, i, "this is taking a while, I'll get back to you on that")
 		content := <-respC
-		_, err = bc.SendMessage(i.ChannelID, content)
+		_, err := bc.SendMessage(i.ChannelID, content)
 		if err != nil {
 			log.Printf("failed to send message: %s", err)
 		}
 	case content := <-respC:
-		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: content,
-			},
-		})
-		if err != nil {
-			log.Printf("failed to send message: %s", err)
-		}
+		respondToCommand(s, i, content)
 	}
 }
 
@@ -114,25 +228,29 @@ type BotClient struct {
 	chat               AutoChatterer
 	registeredCommands []*discordgo.ApplicationCommand
 	token              string
+	persistence        db.Persister
 	sync.RWMutex
 }
 
 // NewBot makes a bot
-func NewBot(conf config.DiscordBotConfig, autochater AutoChatterer) (*BotClient, error) {
+func NewBot(conf config.DiscordBotConfig, autochater AutoChatterer, persister db.Persister) (*BotClient, error) {
 	if conf.Token == "" {
 		return nil, fmt.Errorf("cannot connect")
 	}
 
 	bc := &BotClient{
-		token:     conf.Token,
-		cfg:       conf,
-		chat:      autochater,
-		replyChan: map[string]struct{}{},
+		token:       conf.Token,
+		cfg:         conf,
+		chat:        autochater,
+		replyChan:   map[string]struct{}{},
+		persistence: persister,
 	}
 	for _, ch := range bc.cfg.ReplyChannels {
 		bc.replyChan[ch] = struct{}{}
 	}
 	commandHandlers["ask"] = bc.AskCommand
+	commandHandlers["expgive"] = bc.GiveEXP
+	commandHandlers["expcheck"] = bc.CheckUserEXP
 
 	err := bc.Open()
 	if err != nil {
