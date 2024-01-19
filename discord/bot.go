@@ -323,11 +323,16 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 	if len(allUsers) > 0 {
 		log.Printf("live streams of interest are %#v", allUsers)
 	}
+	if len(knownUsers) > 0 {
+		log.Printf("live streams of interest wee already know about are %#v", knownUsers)
+	}
 	for userchannel, msg := range knownUsers {
 		if ctx.Err() != nil {
+			log.Printf("timed out updating known user")
 			return
 		}
 		if msg == nil {
+			delete(knownUsers, userchannel)
 			continue
 		}
 		if sinfo, ok := streams[strings.TrimSuffix(userchannel, channel)]; ok {
@@ -345,8 +350,10 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 					sinfo.ThumbnailURL, fmt.Sprintf("https://twitch.tv/%s", sinfo.UserLogin), sinfo.GameName)
 				if err != nil {
 					log.Printf("could not send msg: %s", err)
+					delete(knownUsers, userchannel)
+				} else {
+					knownUsers[userchannel] = msg
 				}
-				knownUsers[userchannel] = msg
 			}
 		} else {
 			// remove go live message
@@ -360,18 +367,24 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 	}
 	for user, sinfo := range streams {
 		if ctx.Err() != nil {
+			log.Printf("timed out updating new users")
 			return
 		}
-		if _, ok := knownUsers[user+channel]; !ok && sinfo.Type == "live" {
-			log.Printf("sending I'm live for %s %s", user, channel)
-			msg, err := bc.SendGoLIveMessage(channel,
-				fmt.Sprintf(`%s is live playing with %d viewers`, sinfo.UserName, sinfo.ViewerCount),
-				sinfo.ThumbnailURL, fmt.Sprintf("https://twitch.tv/%s", sinfo.UserLogin), sinfo.GameName)
-			if err != nil {
-				log.Printf("could not send msg: %s", err)
-				return
+		if sinfo.Type == "live" {
+			log.Printf("%s is live", user)
+			if _, ok := knownUsers[user+channel]; !ok {
+				log.Printf("sending I'm live for %s %s", user, channel)
+				msg, err := bc.SendGoLIveMessage(channel,
+					fmt.Sprintf(`%s is live playing with %d viewers`, sinfo.UserName, sinfo.ViewerCount),
+					sinfo.ThumbnailURL, fmt.Sprintf("https://twitch.tv/%s", sinfo.UserLogin), sinfo.GameName)
+				if err != nil {
+					log.Printf("could not send msg: %s", err)
+					continue
+				}
+				knownUsers[user+channel] = msg
+			} else {
+				log.Printf("not sending new message, one already exists %v", knownUsers[user+channel])
 			}
-			knownUsers[user+channel] = msg
 		}
 	}
 }
