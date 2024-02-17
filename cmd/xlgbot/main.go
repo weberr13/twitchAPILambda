@@ -439,6 +439,12 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					log.Printf("got so command from %s", msg.GoString())
 				}
 			},
+			"lurk": func(msg chat.TwitchMessage) {
+				_ = tw.SendMessage(channelName, fmt.Sprintf("%s has retreated into their shell", msg.AtUser()))
+			},
+			"unlurk": func(msg chat.TwitchMessage) {
+				_ = tw.SendMessage(channelName, fmt.Sprintf("%s is ready to party", msg.AtUser()))
+			},
 			"wt": func(msg chat.TwitchMessage) {
 				after := 3 * time.Hour
 				override := msg.GetBotCommandArgs()
@@ -619,7 +625,7 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 				}
 				err = obsC.TogglePromo("PooCrewCheckin") // TODO: put this in the config?
 				if err != nil {
-					log.Printf("could not run xlg checkin: %s", err)
+					log.Printf("could not run poo checkin: %s", err)
 				}
 				time.Sleep(24 * time.Second) // duration of clip put this in config?
 				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
@@ -628,7 +634,7 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 				}
 				err := obsC.TogglePromo("PooCrewCheckin")
 				if err != nil {
-					log.Printf("could not run xlg checkin: %s", err)
+					log.Printf("could not run poo checkin: %s", err)
 				}
 			},
 			"Panda Pals Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
@@ -659,7 +665,7 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 				}
 				err = obsC.TogglePromo("RADCheckin") // TODO: put this in the config?
 				if err != nil {
-					log.Printf("could not run xlg checkin: %s", err)
+					log.Printf("could not run rad checkin: %s", err)
 				}
 				time.Sleep(16 * time.Second) // duration of clip put this in config?
 				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
@@ -668,7 +674,7 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 				}
 				err := obsC.TogglePromo("RADCheckin")
 				if err != nil {
-					log.Printf("could not run xlg checkin: %s", err)
+					log.Printf("could not run rad checkin: %s", err)
 				}
 			},
 		}
@@ -818,7 +824,7 @@ func main() {
 		log.Printf("not starting discord bot: %s", err)
 	} else {
 		contextClose(appContext, wg, discordBot)
-		err = discordBot.BroadcastMessage(ourConfig.Discord.LogChannels, fmt.Sprintf("xlg discord bot has started for %s", channelName))
+		err = discordBot.BroadcastMessage(ourConfig.Discord.LogChannels, fmt.Sprintf("weberr13 discord bot has started for %s", channelName))
 		if err != nil {
 			log.Printf("could not send discord test message: %s", err)
 		}

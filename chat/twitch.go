@@ -328,7 +328,7 @@ func (t *Twitch) Open(ctx context.Context) error {
 auth:
 	for {
 		log.Printf("attempting to authenticate chat")
-		err = t.authenticate("xlgbot", t.token) // twitch seems to ignore this and set it to whatever the user running the bot used to auth
+		err = t.authenticate("weberr13bot", t.token) // twitch seems to ignore this and set it to whatever the user running the bot used to auth
 		if err == ErrAuthFailed {
 			log.Printf("forcing token reauth")
 			err = t.cfg.InvalidateToken(ctx, t.cfg.Twitch.ChannelID, t.cfg.Twitch.ChannelName)
@@ -377,7 +377,7 @@ auth:
 		return fmt.Errorf("failed to listen to topics %w", err)
 	}
 
-	// err = t.sendMessagePrivate(t.cfg.Twitch.ChannelName, "xlg bot has joined")
+	// err = t.sendMessagePrivate(t.cfg.Twitch.ChannelName, "weberr13bot bot has joined")
 	if err != nil {
 		return fmt.Errorf("could not join channel on twitch: %s", err)
 	}
@@ -589,7 +589,7 @@ func (t *Twitch) GetAllStreamInfoForUsers(usernames []string) (map[string]Twitch
 		} else {
 			reqString += "&"
 		}
-		reqString += "user_login=" + user
+		reqString += "user_login=" + strings.ToLower(user)
 	}
 	reqString += fmt.Sprintf("&first=%d", len(usernames))
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
@@ -828,7 +828,7 @@ func (t *Twitch) authenticate(name, token string) (err error) {
 		return fmt.Errorf("no valid token provided")
 	}
 	if name == "" {
-		name = "xlgbot" // twitch seems to ignore this and set it to whatever the user running the bot used to auth
+		name = "weberr13bot" // twitch seems to ignore this and set it to whatever the user running the bot used to auth
 	}
 	passCmd := fmt.Sprintf("PASS oauth:%s", token)
 	err = t.c.WriteMessage(websocket.TextMessage, []byte(passCmd))

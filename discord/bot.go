@@ -620,10 +620,10 @@ func (bc *BotClient) formatGoLive(title, thumbnail, url, game string) *discordgo
 	imageURL := strings.ReplaceAll(strings.ReplaceAll(thumbnail, "{width}", fmt.Sprintf("%d", width)), "{height}", fmt.Sprintf("%d", height))
 	imageURL += "?" + uuid.Must(uuid.NewRandom()).String()
 	embeds = append(embeds, &discordgo.MessageEmbed{
-		Title:       "Twtich",
+		Title:       "Twitch",
 		Description: title,
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: "brought to you by xlgbot @weberr13",
+			Text: "brought to you by @weberr13",
 		},
 		URL: url,
 		Image: &discordgo.MessageEmbedImage{
