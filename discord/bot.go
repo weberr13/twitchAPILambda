@@ -310,15 +310,16 @@ type StreamInfo struct {
 type GetLiveWrapper func([]string) (map[string]StreamInfo, error)
 
 // SINGLE THREADED!
-func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUsers map[string]*discordgo.Message, users []string, channel string, getLiveF GetLiveWrapper) {
-	streams, err := getLiveF(users)
-	if err != nil {
-		log.Printf("could not get live streams: %s", err)
-		return
+func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUsers map[string]*discordgo.Message, users []string, channel string, streams map[string]StreamInfo) {
+	interestedUsers := map[string]struct{}{}
+	for _, k := range users {
+		interestedUsers[strings.ToLower(k)] = struct{}{}
 	}
 	allUsers := []string{}
 	for k := range streams {
-		allUsers = append(allUsers, k)
+		if _, ok := interestedUsers[strings.ToLower(k)]; ok {
+			allUsers = append(allUsers, k)
+		}
 	}
 	if len(allUsers) > 0 {
 		log.Printf("live streams of interest are %#v", allUsers)
@@ -326,23 +327,24 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 	if len(knownUsers) > 0 {
 		log.Printf("live streams of interest wee already know about are %#v", knownUsers)
 	}
-	for userchannel, msg := range knownUsers {
+	for user, msg := range knownUsers {
+		user = strings.ToLower(user)
 		if ctx.Err() != nil {
 			log.Printf("timed out updating known user")
 			return
 		}
 		if msg == nil {
-			delete(knownUsers, userchannel)
+			delete(knownUsers, user)
 			continue
 		}
-		if sinfo, ok := streams[strings.TrimSuffix(userchannel, channel)]; ok {
+		if sinfo, ok := streams[strings.TrimSuffix(user, channel)]; ok {
 			if sinfo.Type != "live" {
 				log.Printf("stream no longer live: remove message with ID: %s in Channel %s, in Guild %s", msg.ID, msg.ChannelID, msg.GuildID)
 				err := bc.DeleteMessage(msg.ChannelID, msg.ID)
 				if err != nil {
 					log.Printf("could not remove our golive message %s", err)
 				}
-				delete(knownUsers, userchannel)
+				delete(knownUsers, user)
 			} else {
 				log.Printf("updating with the new thumbnail: %s", sinfo.ThumbnailURL)
 				msg, err := bc.UpdateGoLiveMessage(msg,
@@ -350,9 +352,9 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 					sinfo.ThumbnailURL, fmt.Sprintf("https://twitch.tv/%s", sinfo.UserLogin), sinfo.GameName)
 				if err != nil {
 					log.Printf("could not send msg: %s", err)
-					delete(knownUsers, userchannel)
+					delete(knownUsers, user)
 				} else {
-					knownUsers[userchannel] = msg
+					knownUsers[user] = msg
 				}
 			}
 		} else {
@@ -362,28 +364,34 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 			if err != nil {
 				log.Printf("could not remove our golive message %s", err)
 			}
-			delete(knownUsers, userchannel)
+			delete(knownUsers, user)
 		}
 	}
 	for user, sinfo := range streams {
+		user = strings.ToLower(user)
 		if ctx.Err() != nil {
 			log.Printf("timed out updating new users")
 			return
 		}
+		_, ok := interestedUsers[user]
+		if !ok {
+			continue
+		}
 		if sinfo.Type == "live" {
 			log.Printf("%s is live", user)
-			if _, ok := knownUsers[user+channel]; !ok {
+			if _, ok := knownUsers[user]; !ok {
 				log.Printf("sending I'm live for %s %s", user, channel)
 				msg, err := bc.SendGoLIveMessage(channel,
 					fmt.Sprintf(`%s is live playing with %d viewers`, sinfo.UserName, sinfo.ViewerCount),
 					sinfo.ThumbnailURL, fmt.Sprintf("https://twitch.tv/%s", sinfo.UserLogin), sinfo.GameName)
 				if err != nil {
 					log.Printf("could not send msg: %s", err)
+					delete(knownUsers, user)
 					continue
 				}
-				knownUsers[user+channel] = msg
+				knownUsers[user] = msg
 			} else {
-				log.Printf("not sending new message, one already exists %v", knownUsers[user+channel])
+				log.Printf("not sending new message, one already exists %v", knownUsers[user])
 			}
 		}
 	}
@@ -421,7 +429,7 @@ func getKnowUsersMessages(persister db.Persister) map[string]map[string]*discord
 		if !ok {
 			m[im.Channel] = make(map[string]*discordgo.Message)
 		}
-		m[im.Channel][im.User] = im.Message
+		m[im.Channel][strings.ToLower(im.User)] = im.Message
 	}
 	return m
 }
@@ -440,19 +448,42 @@ func saveKnowUsersMessages(m map[string]map[string]*discordgo.Message, persister
 			}
 		}
 	}
+	_ = persister.Sync()
 }
 
 // RunAutoShoutouts will start an asyncronous runner that manages shoutouts
-func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, chanToUsers map[string][]string, getLiveF GetLiveWrapper, persister db.Persister) {
+func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, chanToUsers map[string]config.GoLiveConfig, getLiveF GetLiveWrapper, persister db.Persister) {
 	wg.Add(1)
 	go func() {
 		knownUsers := getKnowUsersMessages(persister)
+		allUserSet := map[string]struct{}{}
+		for _, users := range chanToUsers {
+			for _, user := range users.TwitchUsers {
+				allUserSet[strings.ToLower(user)] = struct{}{}
+			}
+		}
+		allUsers := []string{}
+		for user := range allUserSet {
+			allUsers = append(allUsers, user)
+		}
+		var channelInfo map[string]StreamInfo
+		var err error
+		for {
+			channelInfo, err = getLiveF(allUsers)
+			if err != nil {
+				log.Printf("could not get live status, waiting %s", err)
+				time.Sleep(60 * time.Second)
+				continue
+			}
+			break
+		}
+
 		for channel, users := range chanToUsers {
 			if _, ok := knownUsers[channel]; !ok {
 				knownUsers[channel] = make(map[string]*discordgo.Message)
 			}
-			log.Printf("sending shoutouts for channel %s", channel)
-			bc.sendShoutoutToChannelForUsers(ctx, knownUsers[channel], users, channel, getLiveF)
+			log.Printf("sending shoutouts for channel %s %v of %v, known %v", channel, users.TwitchUsers, channelInfo, knownUsers[channel])
+			bc.sendShoutoutToChannelForUsers(ctx, knownUsers[channel], users.TwitchUsers, channel, channelInfo)
 		}
 		saveKnowUsersMessages(knownUsers, persister)
 		defer wg.Done()
@@ -465,12 +496,21 @@ func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, c
 				log.Printf("shutting down")
 				return
 			case <-timer.C:
+				for {
+					channelInfo, err = getLiveF(allUsers)
+					if err != nil {
+						log.Printf("could not get live status, waiting %s", err)
+						time.Sleep(60 * time.Second)
+						continue
+					}
+					break
+				}
 				for channel, users := range chanToUsers {
 					if _, ok := knownUsers[channel]; !ok {
 						knownUsers[channel] = make(map[string]*discordgo.Message)
 					}
-					log.Printf("sending shoutouts for channel %s", channel)
-					bc.sendShoutoutToChannelForUsers(ctx, knownUsers[channel], users, channel, getLiveF)
+					log.Printf("sending shoutouts for channel %s %v of %v", channel, users.TwitchUsers, channelInfo)
+					bc.sendShoutoutToChannelForUsers(ctx, knownUsers[channel], users.TwitchUsers, channel, channelInfo)
 				}
 				saveKnowUsersMessages(knownUsers, persister)
 			}
@@ -598,17 +638,6 @@ func (bc *BotClient) UpdateGoLiveMessage(old *discordgo.Message, title, thumbnai
 	st, err := bc.client.ChannelMessageEditComplex(msgEdit)
 	if err != nil {
 		log.Printf("failure to send channel message %s", err)
-		// err = bc.Close()
-		// if err != nil {
-		// 	log.Panicf("tried to reconnect, close failed: %s", err)
-		// 	return nil, err
-		// }
-		// err = bc.Open()
-		// if err != nil {
-		// 	log.Panicf("tried to reconnect, open failed: %s", err)
-		// 	return nil, err
-		// }
-		// st, err = bc.client.ChannelMessageEditComplex(msgEdit)
 	}
 	return st, err
 }

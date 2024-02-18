@@ -31,6 +31,11 @@ func NewBadger(path string) (*Badger, error) {
 	return k, nil
 }
 
+// Sync to disk
+func (kv *Badger) Sync() error {
+	return kv.db.Sync()
+}
+
 // Close for io.Closer
 func (kv *Badger) Close() error {
 	kv.Lock()
