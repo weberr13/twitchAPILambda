@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/weberr13/twitchAPILambda/autochat"
 	"github.com/weberr13/twitchAPILambda/chat"
 	"github.com/weberr13/twitchAPILambda/config"
@@ -31,6 +32,8 @@ var (
 	ourConfig   *config.Configuration
 	channelName string
 	channelID   string
+	// StatusMessagePrefix is the prefix you use for storing status messages, the other half is a channelid
+	StatusMessagePrefix = "status-"
 )
 
 func init() {
@@ -819,16 +822,69 @@ func main() {
 		log.Printf("cannot persist things!!! %s", err)
 		return
 	}
+
 	defer persist.Close()
+
+	statusMessages := map[string]*discordgo.Message{}
+	keys, err := persist.PrefixScan(StatusMessagePrefix)
+	if err == nil {
+		for _, key := range keys {
+			msg := discordgo.Message{}
+			err := persist.Get(key, &msg)
+			if err == nil {
+				statusMessages[strings.TrimSuffix(key, StatusMessagePrefix)] = &msg
+			}
+		}
+	}
+
 	discordBot, err = discord.NewBot(*ourConfig.Discord, autoChatter, persist)
 	if err != nil {
 		log.Printf("not starting discord bot: %s", err)
 	} else {
-		contextClose(appContext, wg, discordBot)
-		err = discordBot.BroadcastMessage(ourConfig.Discord.LogChannels, fmt.Sprintf("weberr13 discord bot has started for %s", channelName))
-		if err != nil {
-			log.Printf("could not send discord test message: %s", err)
+		statusF := func() {
+			str := fmt.Sprintf("weberr13 discord bot is running. last seen: <t:%d:F>", time.Now().Unix())
+			for ch, msg := range statusMessages {
+				statusMessages[ch], _ = discordBot.UpdateMessage(msg, str)
+				_ = persist.Put(StatusMessagePrefix+ch, statusMessages[ch])
+			}
+			newSends := []string{}
+			for _, ch := range ourConfig.Discord.LogChannels {
+				_, ok := statusMessages[ch]
+				if ok {
+					continue // already have one
+				}
+				newSends = append(newSends, ch)
+			}
+			msgs, err := discordBot.BroadcastMessage(newSends, str)
+			if err != nil {
+				log.Printf("could not send discord test message: %s", err)
+			}
+			for _, msg := range msgs {
+				statusMessages[msg.ChannelID] = msg
+				_ = persist.Put(StatusMessagePrefix+msg.ChannelID, msg)
+			}
+			_ = persist.Sync()
 		}
+		statusF()
+		go func() {
+			tick := time.NewTicker(10 * time.Minute)
+			defer tick.Stop()
+			for {
+				select {
+				case <-appContext.Done():
+					for ch, msg := range statusMessages {
+						if msg != nil {
+							_ = discordBot.DeleteMessage(ch, msg.ID)
+							_ = persist.Delete(StatusMessagePrefix + ch)
+						}
+					}
+					_ = persist.Sync()
+					contextClose(appContext, wg, discordBot)
+				case <-tick.C:
+					statusF()
+				}
+			}
+		}()
 	}
 
 	obsC, err := obs.NewClient(ourConfig.OBS.Password)

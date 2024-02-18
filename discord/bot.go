@@ -553,7 +553,7 @@ func (bc *BotClient) Close() error {
 			log.Printf("removing %#v", v)
 			err := bc.client.ApplicationCommandDelete(bc.client.State.User.ID, GuildID, v.ID)
 			if err != nil {
-				log.Panicf("Cannot delete '%v' command: %v", v.Name, err)
+				log.Printf("Cannot delete '%v' command: %v", v.Name, err)
 			}
 		}
 	}
@@ -566,15 +566,18 @@ func (bc *BotClient) Close() error {
 }
 
 // BroadcastMessage sends a simple message
-func (bc *BotClient) BroadcastMessage(channels []string, message string) error {
+func (bc *BotClient) BroadcastMessage(channels []string, message string) ([]*discordgo.Message, error) {
+	msgs := []*discordgo.Message{}
 	for _, channel := range channels {
-		_, err := bc.SendMessage(channel, message)
+		msg, err := bc.SendMessage(channel, message)
 		if err != nil {
 			log.Printf("could not sent to %s: %s", channel, err)
+			continue
 		}
+		msgs = append(msgs, msg)
 	}
 
-	return nil
+	return msgs, nil
 }
 
 // SendMessage sends a simple message to a channel
@@ -623,6 +626,33 @@ func (bc *BotClient) SendPokemonMessage(msg string, channelName string, pcgChann
 			}(msg.ChannelID, msg.ID)
 		}
 	}
+}
+
+// UpdateMessage that we sent
+func (bc *BotClient) UpdateMessage(old *discordgo.Message, text string) (*discordgo.Message, error) {
+	if old == nil {
+		return nil, fmt.Errorf("cannot update an empty message")
+	}
+	msgEdit := &discordgo.MessageEdit{
+		Content:    &text,
+		Embeds:     old.Embeds,
+		Components: old.Components,
+	}
+	msgEdit.Flags = old.Flags
+	msgEdit.Attachments = &old.Attachments
+	msgEdit.ID = old.ID
+	msgEdit.Channel = old.ChannelID
+
+	bc.Lock()
+	defer bc.Unlock()
+	if bc.client == nil {
+		return nil, fmt.Errorf("no client found")
+	}
+	st, err := bc.client.ChannelMessageEditComplex(msgEdit)
+	if err != nil {
+		log.Printf("failure to send channel message %s", err)
+	}
+	return st, err
 }
 
 // UpdateGoLiveMessage update a golive with new info
