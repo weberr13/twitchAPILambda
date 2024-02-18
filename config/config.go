@@ -53,16 +53,54 @@ type OBS struct {
 	Password string `json:"password"`
 }
 
+// Clean the config of any case stuff
+func (o *OBS) Clean() {
+}
+
 // DiscordBotConfig configures a registered discord bot
 type DiscordBotConfig struct {
-	ApplicationID     string              `json:"applicationID"`
-	PublicKey         string              `json:"publicKey"`
-	Token             string              `json:"token"`
-	BroadcastChannels []string            `json:"broadcastChannels"`
-	PCGChannels       []string            `json:"pcgChannels"`
-	ReplyChannels     []string            `json:"replyChannels"`
-	LogChannels       []string            `json:"logChannels"`
-	GoLiveChannels    map[string][]string `json:"goLiveChannels"` // channel -> list of users
+	ApplicationID     string                  `json:"applicationID"`
+	PublicKey         string                  `json:"publicKey"`
+	Token             string                  `json:"token"`
+	BroadcastChannels []string                `json:"broadcastChannels"`
+	PCGChannels       []string                `json:"pcgChannels"`
+	ReplyChannels     []string                `json:"replyChannels"`
+	LogChannels       []string                `json:"logChannels"`
+	GoLiveChannels    map[string]GoLiveConfig `json:"goLiveChannels"` // channel -> list of users
+}
+
+// Clean case etc
+func (dbc *DiscordBotConfig) Clean() {
+	for _, v := range dbc.GoLiveChannels {
+		v.Clean()
+	}
+}
+
+// GoLiveConfig has the config for a channel's goLive notificiations
+type GoLiveConfig struct {
+	DiscordName  string   `json:"discordName"`
+	DiscordOwner string   `json:"discordOwner"`
+	LiveMessage  string   `json:"liveMessage"`
+	TwitchUsers  []string `json:"twitchUsers"`
+	TiktocUsers  []string `json:"tikTocUsers"`
+	KickUsers    []string `json:"kickUsers"`
+	YoutubeUsers []string `json:"youtubeUsers"`
+}
+
+// Clean case etc
+func (glc *GoLiveConfig) Clean() {
+	glc.TwitchUsers = stringSliceToLower(glc.TwitchUsers)
+	glc.TiktocUsers = stringSliceToLower(glc.TiktocUsers)
+	glc.KickUsers = stringSliceToLower(glc.KickUsers)
+	glc.YoutubeUsers = stringSliceToLower(glc.YoutubeUsers)
+}
+
+func stringSliceToLower(in []string) []string {
+	out := []string{}
+	for _, s := range in {
+		out = append(out, strings.ToLower(s))
+	}
+	return out
 }
 
 // TwitchConfig params that allow a twitch bot to run
@@ -74,6 +112,10 @@ type TwitchConfig struct {
 	Socials     []string                 `json:"socials"`
 	Timers      map[string]*TimerConfig  `json:"timers"`
 	Commands    map[string]CommandConfig `json:"commands"`
+}
+
+// Clean case etc
+func (tc *TwitchConfig) Clean() {
 }
 
 // CommandConfig is a simple command configuration
@@ -141,6 +183,10 @@ type LocalOBS struct {
 	BRBScene    string `json:"brbScene"`
 }
 
+// Clean the config of any case stuff
+func (o *LocalOBS) Clean() {
+}
+
 // Configuration embedded at build time
 type Configuration struct {
 	ClientSecret       string            `json:"clientSecret"`
@@ -155,6 +201,16 @@ type Configuration struct {
 	Twitch             TwitchConfig      `json:"twitch"`
 	OBS                OBS               `json:"obs"`
 	LocalOBS           LocalOBS          `json:"localOBS"`
+}
+
+// Clean the config, fix case/etc
+func (c *Configuration) Clean() {
+	if c.Discord != nil {
+		c.Discord.Clean()
+	}
+	c.Twitch.Clean()
+	c.OBS.Clean()
+	c.LocalOBS.Clean()
 }
 
 // TokenResponse contains the server side cached token

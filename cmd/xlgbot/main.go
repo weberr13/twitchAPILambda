@@ -35,6 +35,7 @@ var (
 
 func init() {
 	ourConfig = config.NewConfig()
+	ourConfig.Clean()
 }
 
 // RunTimer runs a timer

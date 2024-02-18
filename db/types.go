@@ -14,5 +14,6 @@ type Persister interface {
 	Put(key string, value any) error
 	Delete(key string) error
 	PrefixScan(prefix string) ([]string, error)
+	Sync() error
 	io.Closer
 }
