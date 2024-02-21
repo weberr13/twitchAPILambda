@@ -78,13 +78,15 @@ func (dbc *DiscordBotConfig) Clean() {
 
 // GoLiveConfig has the config for a channel's goLive notificiations
 type GoLiveConfig struct {
-	DiscordName  string   `json:"discordName"`
-	DiscordOwner string   `json:"discordOwner"`
-	LiveMessage  string   `json:"liveMessage"`
-	TwitchUsers  []string `json:"twitchUsers"`
-	TiktocUsers  []string `json:"tikTocUsers"`
-	KickUsers    []string `json:"kickUsers"`
-	YoutubeUsers []string `json:"youtubeUsers"`
+	DiscordName    string   `json:"discordName"`
+	DiscordOwner   string   `json:"discordOwner"`
+	LiveMessage    string   `json:"liveMessage"`
+	TwitchUsers    []string `json:"twitchUsers"`
+	TwitchHashtags []string `json:"twitchHashtags"`
+	TiktocUsers    []string `json:"tikTocUsers"`
+	KickUsers      []string `json:"kickUsers"`
+	YoutubeUsers   []string `json:"youtubeUsers"`
+	PartingMessage bool     `json:"partingMessage"`
 }
 
 // Clean case etc
@@ -93,6 +95,7 @@ func (glc *GoLiveConfig) Clean() {
 	glc.TiktocUsers = stringSliceToLower(glc.TiktocUsers)
 	glc.KickUsers = stringSliceToLower(glc.KickUsers)
 	glc.YoutubeUsers = stringSliceToLower(glc.YoutubeUsers)
+	// glc.TwitchHashtags = stringSliceToLower((glc.TwitchHashtags))
 }
 
 func stringSliceToLower(in []string) []string {
