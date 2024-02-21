@@ -408,6 +408,7 @@ type TwitchChannelInfo struct {
 	BroadcasterLanguage        string   `json:"broadcaster_language"`
 	GameID                     string   `json:"game_id"`
 	GameName                   string   `json:"game_name"`
+	IsLive                     bool     `json:"is_live"`
 	Title                      string   `json:"title"`
 	Delay                      int      `json:"delay"`
 	Taghs                      []string `json:"tags"`
@@ -571,6 +572,57 @@ func (t *Twitch) authorizeRequest(req *http.Request) {
 	t.cfg.SetAuthorization(req, t.token)
 }
 
+// // SearchChannels search live channels for a term
+// func (t *Twitch) SearchChannels(term string) ([]TwitchChannelInfo, int, error) {
+// 	params := url.Values{}
+// 	// params.Add("live_only", "true")
+// 	params.Add("first", "100")
+// 	params.Add("query", term)
+// 	reqString := "https://api.twitch.tv/helix/search/channels?" + params.Encode()
+// 	log.Printf("searching for channels with %s", reqString)
+
+// 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
+// 	defer cancel()
+// 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqString, nil)
+// 	if err != nil {
+// 		return nil, http.StatusInternalServerError, fmt.Errorf("cannot make request: %w", err)
+// 	}
+// 	t.authorizeRequest(req)
+// 	res, err := http.DefaultClient.Do(req)
+// 	if err != nil {
+// 		return nil, http.StatusInternalServerError, fmt.Errorf("cannot do request: %w", err)
+// 	}
+// 	if res.Body != nil {
+// 		defer res.Body.Close()
+// 	}
+// 	if res.StatusCode > http.StatusMultipleChoices {
+// 		return nil, res.StatusCode, fmt.Errorf("got back %d on get streams command", res.StatusCode)
+// 	}
+// 	b, err := io.ReadAll(res.Body)
+// 	if err != nil {
+// 		return nil, http.StatusInternalServerError, err
+// 	}
+// 	log.Printf("got back: %s", string(b))
+// 	type respData struct {
+// 		Data []TwitchChannelInfo `json:"data"` // TODO: do we want this to be the real thing?
+// 	}
+// 	streams := &respData{}
+// 	err = json.Unmarshal(b, streams)
+// 	if err != nil {
+// 		return nil, http.StatusInternalServerError, err
+// 	}
+// 	if len(streams.Data) == 0 {
+// 		log.Printf("found nothing")
+// 	}
+// 	cleaned := []TwitchChannelInfo{}
+// 	for _, d := range streams.Data {
+// 		if d.IsLive {
+// 			cleaned = append(cleaned, d)
+// 		}
+// 	}
+// 	return cleaned, http.StatusOK, nil
+// }
+
 // GetAllStreamInfoForUsers will give the stream info for the given channel names
 // curl -X GET 'https://api.twitch.tv/helix/streams'
 // https://dev.twitch.tv/docs/api/reference/#get-streams
@@ -591,7 +643,7 @@ func (t *Twitch) GetAllStreamInfoForUsers(usernames []string) (map[string]Twitch
 		}
 		reqString += "user_login=" + strings.ToLower(user)
 	}
-	reqString += fmt.Sprintf("&first=%d", len(usernames))
+	reqString += fmt.Sprintf("&first=%d", len(usernames)) // limit is 100 this will need to page eventually
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqString, nil)

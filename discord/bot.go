@@ -312,8 +312,35 @@ type StreamInfo struct {
 // GetLiveWrapper is a function that returns stream info normalized for what this package requires
 type GetLiveWrapper func([]string) (map[string]StreamInfo, error)
 
+// SearchLiveWrapper is a function that returns a list of streams that match a search term
+type SearchLiveWrapper func(string) []string
+
 // SINGLE THREADED!
-func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUsers map[string]*discordgo.Message, users []string, channel string, streams map[string]StreamInfo, description string) {
+func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUsers map[string]*discordgo.Message, users []string, channel string, streams map[string]StreamInfo, description string, partingMessage bool) {
+	partF := func(msg *discordgo.Message, userName string) {
+		info := GoLiveInfo{
+			User:     userName,
+			Platform: "Twitch",
+			Now:      time.Now().Unix(),
+			PostTime: msg.Timestamp.Unix(),
+		}
+		_, err := bc.SendPartingLiveMessage(channel, fmt.Sprintf("https://twitch.tv/%s", userName), info)
+		if err != nil {
+			log.Printf("could not send parting message for our golive message %s", err)
+		}
+	}
+
+	deleteF := func(msg *discordgo.Message, chanAndUser string, userName string) {
+		err := bc.DeleteMessage(msg.ChannelID, msg.ID)
+		if err != nil {
+			log.Printf("could not remove our golive message %s", err)
+		}
+		delete(knownUsers, chanAndUser)
+		if partingMessage {
+			partF(msg, userName)
+		}
+	}
+
 	interestedUsers := map[string]struct{}{}
 	for _, k := range users {
 		interestedUsers[strings.ToLower(k)] = struct{}{}
@@ -330,24 +357,21 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 	if len(knownUsers) > 0 {
 		log.Printf("live streams of interest wee already know about are %#v", knownUsers)
 	}
-	for user, msg := range knownUsers {
-		user = strings.ToLower(user)
+	for chanAndUser, msg := range knownUsers {
+		chanAndUser = strings.ToLower(chanAndUser)
 		if ctx.Err() != nil {
 			log.Printf("timed out updating known user")
 			return
 		}
 		if msg == nil {
-			delete(knownUsers, user)
+			delete(knownUsers, chanAndUser)
 			continue
 		}
-		if sinfo, ok := streams[strings.TrimSuffix(user, channel)]; ok {
+		userName := strings.TrimPrefix(chanAndUser, channel)
+		if sinfo, ok := streams[userName]; ok {
 			if sinfo.Type != "live" {
 				log.Printf("stream no longer live: remove message with ID: %s in Channel %s, in Guild %s", msg.ID, msg.ChannelID, msg.GuildID)
-				err := bc.DeleteMessage(msg.ChannelID, msg.ID)
-				if err != nil {
-					log.Printf("could not remove our golive message %s", err)
-				}
-				delete(knownUsers, user)
+				deleteF(msg, chanAndUser, userName)
 			} else {
 				log.Printf("updating with the new thumbnail: %s", sinfo.ThumbnailURL)
 				info := GoLiveInfo{
@@ -361,23 +385,20 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 					sinfo.ThumbnailURL, fmt.Sprintf("https://twitch.tv/%s", sinfo.UserLogin), info)
 				if err != nil {
 					log.Printf("could not send msg: %s", err)
-					delete(knownUsers, user)
+					delete(knownUsers, chanAndUser)
 				} else {
-					knownUsers[user] = msg
+					knownUsers[chanAndUser] = msg
 				}
 			}
 		} else {
 			// remove go live message
-			log.Printf("can't find stream: remove message with ID: %s in Channel %s, in Guild %s", msg.ID, msg.ChannelID, msg.GuildID)
-			err := bc.DeleteMessage(msg.ChannelID, msg.ID)
-			if err != nil {
-				log.Printf("could not remove our golive message %s", err)
-			}
-			delete(knownUsers, user)
+			log.Printf("can't find stream %s in %#v: remove message with ID: %s in Channel %s, in Guild %s", userName, streams, msg.ID, msg.ChannelID, msg.GuildID)
+			deleteF(msg, chanAndUser, userName)
 		}
 	}
 	for user, sinfo := range streams {
 		user = strings.ToLower(user)
+		chanAndUser := channel + user
 		if ctx.Err() != nil {
 			log.Printf("timed out updating new users")
 			return
@@ -388,7 +409,7 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 		}
 		if sinfo.Type == "live" {
 			log.Printf("%s is live", user)
-			if _, ok := knownUsers[user]; !ok {
+			if _, ok := knownUsers[chanAndUser]; !ok {
 				log.Printf("sending I'm live for %s %s", user, channel)
 				info := GoLiveInfo{
 					User:        sinfo.UserName,
@@ -401,12 +422,10 @@ func (bc *BotClient) sendShoutoutToChannelForUsers(ctx context.Context, knownUse
 					sinfo.ThumbnailURL, fmt.Sprintf("https://twitch.tv/%s", sinfo.UserLogin), info)
 				if err != nil {
 					log.Printf("could not send msg: %s", err)
-					delete(knownUsers, user)
+					delete(knownUsers, chanAndUser)
 					continue
 				}
-				knownUsers[user] = msg
-			} else {
-				log.Printf("not sending new message, one already exists %v", knownUsers[user])
+				knownUsers[chanAndUser] = msg
 			}
 		}
 	}
@@ -450,6 +469,7 @@ func getKnowUsersMessages(persister db.Persister) map[string]map[string]*discord
 }
 
 func saveKnowUsersMessages(m map[string]map[string]*discordgo.Message, persister db.Persister) {
+	knownKeys := map[string]struct{}{}
 	for ch, msgs := range m {
 		for user, msg := range msgs {
 			im := &ImLive{
@@ -457,30 +477,65 @@ func saveKnowUsersMessages(m map[string]map[string]*discordgo.Message, persister
 				User:    user,
 				Message: msg,
 			}
+			knownKeys[im.Key()] = struct{}{}
 			err := persister.Put(im.Key(), im)
 			if err != nil {
 				log.Printf("could not save known user %v in I'm live %s", im, err)
 			}
 		}
 	}
-	_ = persister.Sync()
+
+	keys, err := persister.PrefixScan(knownUserPrefix)
+	if err != nil {
+		log.Printf("could not read known users in I'm live, starting over: %s", err)
+	} else {
+		for _, key := range keys {
+			_, ok := knownKeys[key]
+			if !ok {
+				_ = persister.Delete(key)
+			}
+		}
+	}
+
+	err = persister.Sync()
+	if err != nil {
+		log.Printf("could not sync persistence: %s", err)
+	}
 }
 
 // RunAutoShoutouts will start an asyncronous runner that manages shoutouts
-func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, chanToUsers map[string]config.GoLiveConfig, getLiveF GetLiveWrapper, persister db.Persister) {
+func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, chanToUsers map[string]config.GoLiveConfig, getLiveF GetLiveWrapper, searchF SearchLiveWrapper, persister db.Persister) {
 	wg.Add(1)
 	go func() {
 		knownUsers := getKnowUsersMessages(persister)
 		allUserSet := map[string]struct{}{}
+		allHashtagsSet := map[string][]string{}
 		for _, users := range chanToUsers {
+			for _, hashtag := range users.TwitchHashtags {
+				allHashtagsSet[hashtag] = []string{}
+			}
 			for _, user := range users.TwitchUsers {
 				allUserSet[strings.ToLower(user)] = struct{}{}
+			}
+		}
+
+		if len(allHashtagsSet) > 0 {
+			for hashtag := range allHashtagsSet {
+				hashtagUsers := searchF(hashtag)
+				if len(hashtagUsers) > 0 {
+					allHashtagsSet[hashtag] = hashtagUsers
+					for _, user := range hashtagUsers {
+						log.Printf("found %s with hashtag %s", user, hashtag)
+						allUserSet[user] = struct{}{}
+					}
+				}
 			}
 		}
 		allUsers := []string{}
 		for user := range allUserSet {
 			allUsers = append(allUsers, user)
 		}
+
 		var channelInfo map[string]StreamInfo
 		var err error
 		for {
@@ -497,8 +552,8 @@ func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, c
 			if _, ok := knownUsers[channel]; !ok {
 				knownUsers[channel] = make(map[string]*discordgo.Message)
 			}
-			log.Printf("sending shoutouts for channel %s %v of %v, known %v", channel, users.TwitchUsers, channelInfo, knownUsers[channel])
-			bc.sendShoutoutToChannelForUsers(ctx, knownUsers[channel], users.TwitchUsers, channel, channelInfo, users.LiveMessage)
+			log.Printf("sending shoutouts for channel %s", users.DiscordName)
+			bc.sendShoutoutToChannelForUsers(ctx, knownUsers[channel], users.TwitchUsers, channel, channelInfo, users.LiveMessage, users.PartingMessage)
 		}
 		saveKnowUsersMessages(knownUsers, persister)
 		defer wg.Done()
@@ -525,7 +580,7 @@ func (bc *BotClient) RunAutoShoutouts(ctx context.Context, wg *sync.WaitGroup, c
 						knownUsers[channel] = make(map[string]*discordgo.Message)
 					}
 					log.Printf("sending shoutouts for channel %s %v of %v", channel, users.TwitchUsers, channelInfo)
-					bc.sendShoutoutToChannelForUsers(ctx, knownUsers[channel], users.TwitchUsers, channel, channelInfo, users.LiveMessage)
+					bc.sendShoutoutToChannelForUsers(ctx, knownUsers[channel], users.TwitchUsers, channel, channelInfo, users.LiveMessage, users.PartingMessage)
 				}
 				saveKnowUsersMessages(knownUsers, persister)
 			}
@@ -695,6 +750,42 @@ type GoLiveInfo struct {
 	Platform    string
 	Description string
 	Game        string
+	PostTime    int64
+	Now         int64
+}
+
+func (bc *BotClient) formatPartingMessage(url string, info GoLiveInfo) *discordgo.MessageSend {
+	info.User = strcase.ToCamel(info.User)
+	description := fmt.Sprintf("%s was live on %s from <t:%d:F> to <t:%d:F>. Follow them so you don't miss next time.", info.User, info.Platform, info.PostTime, info.Now)
+
+	embeds := []*discordgo.MessageEmbed{}
+	embeds = append(embeds, &discordgo.MessageEmbed{
+		Title:       info.Platform,
+		Description: description,
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "brought to you by @weberr13",
+		},
+		URL:    url,
+		Fields: []*discordgo.MessageEmbedField{},
+	})
+	msg := &discordgo.MessageSend{
+		Components: []discordgo.MessageComponent{
+			&discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					&discordgo.Button{
+						Style: discordgo.LinkButton,
+						Label: "Follow",
+						URL:   url,
+						Emoji: discordgo.ComponentEmoji{
+							Name: "👀",
+						},
+					},
+				},
+			},
+		},
+		Embeds: embeds,
+	}
+	return msg
 }
 
 func (bc *BotClient) formatGoLive(thumbnail, url string, info GoLiveInfo) *discordgo.MessageSend {
@@ -759,6 +850,22 @@ func (bc *BotClient) formatGoLive(thumbnail, url string, info GoLiveInfo) *disco
 		Embeds: embeds,
 	}
 	return msg
+}
+
+// SendPartingLiveMessage sends a message indicating that a user was live but is no longer
+func (bc *BotClient) SendPartingLiveMessage(channel string, url string, info GoLiveInfo) (*discordgo.Message, error) {
+	info.Now = time.Now().Unix()
+	msg := bc.formatPartingMessage(url, info)
+	bc.Lock()
+	defer bc.Unlock()
+	if bc.client == nil {
+		return nil, fmt.Errorf("no connection")
+	}
+	st, err := bc.client.ChannelMessageSendComplex(channel, msg)
+	if err != nil {
+		log.Printf("failure to send channel message %#v, %s", msg, err)
+	}
+	return st, err
 }
 
 // SendGoLIveMessage send a message with embedds included

@@ -105,7 +105,7 @@ func contextClose(ctx context.Context, wg *sync.WaitGroup, closer io.Closer) {
 	go func() {
 		defer wg.Done()
 		<-ctx.Done()
-		log.Printf("closing %#v", closer)
+		// log.Printf("closing %#v", closer)
 		err := closer.Close()
 		if err != nil {
 			log.Printf("problem closing %#v %s", closer, err)
@@ -832,7 +832,7 @@ func main() {
 			msg := discordgo.Message{}
 			err := persist.Get(key, &msg)
 			if err == nil {
-				statusMessages[strings.TrimSuffix(key, StatusMessagePrefix)] = &msg
+				statusMessages[strings.TrimPrefix(key, StatusMessagePrefix)] = &msg
 			}
 		}
 	}
@@ -933,57 +933,73 @@ func main() {
 	contextClose(appContext, wg, tw)
 
 	if discordBot != nil && channelName == "weberr13" { // for now this only runs on my machine
-		discordBot.RunAutoShoutouts(appContext, wg, ourConfig.Discord.GoLiveChannels, func(users []string) (map[string]discord.StreamInfo, error) {
-			m := make(map[string]discord.StreamInfo)
-			log.Printf("getting live status for %#v", users)
-			twitchChans, code, err := tw.GetAllStreamInfoForUsers(users)
-			if err != nil {
-				if code == http.StatusUnauthorized {
-					log.Printf("could not get live channels for twitch: %s attempting to reconnect", err)
-					err = tw.Reconnect(appContext, channelID, channelName)
-					if err != nil {
-						return m, err
-					}
-				} else {
-					for i := 0; i < 10; i++ {
-						log.Printf("could not get live channels for twitch: %s not attempting to reconnect", err)
-						twitchChans, code, err = tw.GetAllStreamInfoForUsers(users)
-						if err == nil {
-							break
-						} else if code == http.StatusUnauthorized {
-							log.Printf("could not get live channels for twitch: %s attempting to reconnect", err)
-							err = tw.Reconnect(appContext, channelID, channelName)
-							if err != nil {
-								return m, err
+		discordBot.RunAutoShoutouts(appContext, wg, ourConfig.Discord.GoLiveChannels,
+			func(users []string) (map[string]discord.StreamInfo, error) {
+				m := make(map[string]discord.StreamInfo)
+				log.Printf("getting live status for %#v", users)
+				twitchChans, code, err := tw.GetAllStreamInfoForUsers(users)
+				if err != nil {
+					if code == http.StatusUnauthorized {
+						log.Printf("could not get live channels for twitch: %s attempting to reconnect", err)
+						err = tw.Reconnect(appContext, channelID, channelName)
+						if err != nil {
+							return m, err
+						}
+					} else {
+						for i := 0; i < 10; i++ {
+							log.Printf("could not get live channels for twitch: %s not attempting to reconnect", err)
+							twitchChans, code, err = tw.GetAllStreamInfoForUsers(users)
+							if err == nil {
+								break
+							} else if code == http.StatusUnauthorized {
+								log.Printf("could not get live channels for twitch: %s attempting to reconnect", err)
+								err = tw.Reconnect(appContext, channelID, channelName)
+								if err != nil {
+									return m, err
+								}
 							}
 						}
 					}
 				}
-			}
-			if err != nil {
-				// err = tw.Reconnect(appContext, channelID, channelName)
-				// if err != nil {
-				// 	return m, err
-				// }
-				return nil, err
-			}
-			for user, st := range twitchChans {
-				m[user] = discord.StreamInfo{
-					UserLogin:    st.UserLogin,
-					UserName:     st.UserName,
-					GameName:     st.GameName,
-					Type:         st.Type,
-					Title:        st.Title,
-					ViewerCount:  st.ViewerCount,
-					StartedAt:    st.StartedAt,
-					Language:     st.Language,
-					ThumbnailURL: st.ThumbnailURL,
-					IsMature:     st.IsMature,
+				if err != nil {
+					// err = tw.Reconnect(appContext, channelID, channelName)
+					// if err != nil {
+					// 	return m, err
+					// }
+					return nil, err
 				}
-			}
-			// Can support other platforms
-			return m, nil
-		}, persist)
+				for user, st := range twitchChans {
+					m[user] = discord.StreamInfo{
+						UserLogin:    st.UserLogin,
+						UserName:     st.UserName,
+						GameName:     st.GameName,
+						Type:         st.Type,
+						Title:        st.Title,
+						ViewerCount:  st.ViewerCount,
+						StartedAt:    st.StartedAt,
+						Language:     st.Language,
+						ThumbnailURL: st.ThumbnailURL,
+						IsMature:     st.IsMature,
+					}
+				}
+				// Can support other platforms
+				return m, nil
+			},
+			func(t string) []string {
+				return nil
+				// https://twitch.uservoice.com/forums/310213-developers/suggestions/43079766-stream-title-searching
+				// infos, code, err := tw.SearchChannels(t)
+				// if err != nil {
+				// 	log.Printf("failed search for %s with code %d: %s", t, code, err)
+				// 	return nil
+				// }
+				// channels := []string{}
+				// for _, info := range infos {
+				// 	channels = append(channels, info.BroadcasterLogin)
+				// }
+				// return channels
+			},
+			persist)
 	}
 
 	sigs := make(chan os.Signal, 1)
