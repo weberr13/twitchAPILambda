@@ -378,9 +378,9 @@ auth:
 	}
 
 	// err = t.sendMessagePrivate(t.cfg.Twitch.ChannelName, "weberr13bot bot has joined")
-	if err != nil {
-		return fmt.Errorf("could not join channel on twitch: %s", err)
-	}
+	// if err != nil {
+	// 	return fmt.Errorf("could not join channel on twitch: %s", err)
+	// }
 	return nil
 }
 
@@ -694,16 +694,17 @@ type ListenMessage struct {
 
 func (t *Twitch) listenToTopics() error {
 	if t.p != nil {
+		topics := []string{
+			fmt.Sprintf("channel-bits-events-v1.%s", t.cfg.Twitch.ChannelID),
+			fmt.Sprintf("channel-points-channel-v1.%s", t.cfg.Twitch.ChannelID),
+			fmt.Sprintf("channel-subscribe-events-v1.%s", t.cfg.Twitch.ChannelID),
+			fmt.Sprintf("channel-subscribe-events-v1.%s", t.cfg.Twitch.ChannelID),
+		}
 		msg := ListenMessage{
 			Type: "LISTEN",
 			Data: ListenTopic{
 				AuthToken: t.token,
-				Topics: []string{
-					fmt.Sprintf("channel-bits-events-v1.%s", t.cfg.Twitch.ChannelID),
-					fmt.Sprintf("channel-points-channel-v1.%s", t.cfg.Twitch.ChannelID),
-					fmt.Sprintf("channel-subscribe-events-v1.%s", t.cfg.Twitch.ChannelID),
-					fmt.Sprintf("channel-subscribe-events-v1.%s", t.cfg.Twitch.ChannelID),
-				},
+				Topics:    topics,
 			},
 		}
 		err := t.p.WriteJSON(msg)
