@@ -449,6 +449,27 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 			"unlurk": func(msg chat.TwitchMessage) {
 				_ = tw.SendMessage(channelName, fmt.Sprintf("%s is ready to party", msg.AtUser()))
 			},
+			"ban": func(msg chat.TwitchMessage) {
+				if msg.IsMod() {
+					err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+					if err != nil {
+						log.Printf("could not toggle audio: %s", err)
+					}
+					err = obsC.TogglePromo("YouLose") // TODO: put this in the config?
+					if err != nil {
+						log.Printf("could not run ban source: %s", err)
+					}
+					time.Sleep(10 * time.Second) // duration of clip put this in config?
+					err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+					if err != nil {
+						log.Printf("could not toggle audio: %s", err)
+					}
+					err := obsC.TogglePromo("YouLose")
+					if err != nil {
+						log.Printf("could not run ban source: %s", err)
+					}
+				}
+			},
 			"wt": func(msg chat.TwitchMessage) {
 				after := 3 * time.Hour
 				override := msg.GetBotCommandArgs()
@@ -601,24 +622,24 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 			go RunTimer(ctx, wg, timer, commands, func(s string) { _ = tw.SendMessage(channelName, s) }, ourConfig.Twitch.Timers[name].ToggleC)
 		}
 		redemptionHandlers := map[string]func(context.Context, chat.TwitchPointRedemption){
-			"XLG Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
-				log.Printf("got XLG checkin")
+			"Melly's Garden Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
+				log.Printf("got Melly checkin")
 				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
 				if err != nil {
 					log.Printf("could not toggle audio: %s", err)
 				}
-				err = obsC.TogglePromo("XLGCheckin") // TODO: put this in the config?
+				err = obsC.TogglePromo("MellyCheckin") // TODO: put this in the config?
 				if err != nil {
-					log.Printf("could not run xlg checkin: %s", err)
+					log.Printf("could not run melly checkin: %s", err)
 				}
-				time.Sleep(35 * time.Second) // duration of clip put this in config?
+				time.Sleep(54 * time.Second) // duration of clip put this in config?
 				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
 				if err != nil {
 					log.Printf("could not toggle audio: %s", err)
 				}
-				err := obsC.TogglePromo("XLGCheckin")
+				err := obsC.TogglePromo("MellyCheckin")
 				if err != nil {
-					log.Printf("could not run xlg checkin: %s", err)
+					log.Printf("could not run melly checkin: %s", err)
 				}
 			},
 			"PooCrew Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
