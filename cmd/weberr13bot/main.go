@@ -470,6 +470,27 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					}
 				}
 			},
+			"songs": func(msg chat.TwitchMessage) {
+				if msg.IsMod() && strings.Contains(msg.Body(), "skip") {
+					err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+					if err != nil {
+						log.Printf("could not toggle audio: %s", err)
+					}
+					err = obsC.TogglePromo("ChangeIT") // TODO: put this in the config?
+					if err != nil {
+						log.Printf("could not run skip source: %s", err)
+					}
+					time.Sleep(6 * time.Second) // duration of clip put this in config?
+					err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+					if err != nil {
+						log.Printf("could not toggle audio: %s", err)
+					}
+					err := obsC.TogglePromo("ChangeIT")
+					if err != nil {
+						log.Printf("could not run skip source: %s", err)
+					}
+				}
+			},
 			"wt": func(msg chat.TwitchMessage) {
 				after := 3 * time.Hour
 				override := msg.GetBotCommandArgs()
@@ -518,6 +539,15 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					tw.Shoutout(channelName, user, true)
 				} else {
 					log.Printf("got so command from %s", msg.GoString())
+				}
+			},
+			"contentkrew": func(msg chat.TwitchMessage) {
+				if msg.IsMod() || msg.IsSub() || msg.IsVIP() {
+					// TODO: put this in config?
+					err = tw.SendMessage(channelName, "subscribe to the content krew https://youtube.com/@Content_Krew https://www.tiktok.com/@content_krew")
+					if err != nil {
+						log.Printf("could not send message %s: %s", msg.DisplayName(), err)
+					}
 				}
 			},
 			// todo alias? "rm":
@@ -680,6 +710,26 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 				err := obsC.TogglePromo("PandaPals")
 				if err != nil {
 					log.Printf("could not run panda pals checkin: %s", err)
+				}
+			},
+			"Team No Sleep": func(ctx context.Context, _ chat.TwitchPointRedemption) {
+				log.Printf("got team no sleep checkin")
+				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+				if err != nil {
+					log.Printf("could not toggle audio: %s", err)
+				}
+				err = obsC.TogglePromo("Yawn") // TODO: put this in the config?
+				if err != nil {
+					log.Printf("could not run nosleep checkin: %s", err)
+				}
+				time.Sleep(24 * time.Second) // duration of clip put this in config?
+				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+				if err != nil {
+					log.Printf("could not toggle audio: %s", err)
+				}
+				err := obsC.TogglePromo("Yawn")
+				if err != nil {
+					log.Printf("could not run nosleep checkin: %s", err)
 				}
 			},
 			"RAD Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
