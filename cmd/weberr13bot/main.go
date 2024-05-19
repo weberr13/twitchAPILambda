@@ -746,9 +746,6 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					return
 				}
 			}
-			if !config.IsLive.Load() && !msg.IsOwner() {
-				continue
-			}
 			switch msg.Type() {
 			case chat.PrivateMessage:
 				switch {
@@ -776,11 +773,17 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 						continue readloop
 					}
 				case msg.IsBotCommand():
+					if !config.IsLive.Load() && !msg.IsOwner() {
+						continue
+					}
 					if f, ok := commands[msg.GetBotCommand()]; ok {
 						f(msg)
 					}
 					log.Printf("command: %s, args: %s", msg.GetBotCommand(), msg.GetBotCommandArgs())
 				default:
+					if !config.IsLive.Load() && !msg.IsOwner() {
+						continue
+					}
 					user := strings.TrimPrefix(msg.User(), ":")
 					// log.Printf("checking for autoshoutout for %s in %#v", user, shoutouts)
 					if so, ok := shoutouts[user].(ShoutOutUser); ok {
