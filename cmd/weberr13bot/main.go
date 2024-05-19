@@ -204,6 +204,15 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					log.Printf("we should be reconnected")
 				}
 			},
+			"checkLive": func(msg chat.TwitchMessage) {
+				if msg.IsOwner() {
+					if config.IsLive.Load() {
+						_ = tw.SendMessage(channelName, "We are live!")
+					} else {
+						_ = tw.SendMessage(channelName, "We are dead!")
+					}
+				}
+			},
 			"juteboxVolume": func(msg chat.TwitchMessage) {
 				if msg.IsMod() {
 					s := msg.GetBotCommandArgs()
@@ -278,7 +287,11 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 			},
 			"discord": func(msg chat.TwitchMessage) {
 				if ourConfig.Twitch.Discord != "" {
-					_ = tw.SendMessage(channelName, "Join me on discord at "+ourConfig.Twitch.Discord)
+					if config.IsLive.Load() {
+						_ = tw.SendMessage(channelName, "Join me on discord at "+ourConfig.Twitch.Discord)
+					} else {
+						_ = tw.SendMessage(channelName, "Find me on discord at "+ourConfig.Twitch.Discord)
+					}
 				} else {
 					log.Printf("no discord configured: %#v", ourConfig.Twitch)
 				}
@@ -672,26 +685,6 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					log.Printf("could not run melly checkin: %s", err)
 				}
 			},
-			"PooCrew Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
-				log.Printf("got Pooo checkin")
-				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
-				if err != nil {
-					log.Printf("could not toggle audio: %s", err)
-				}
-				err = obsC.TogglePromo("PooCrewCheckin") // TODO: put this in the config?
-				if err != nil {
-					log.Printf("could not run poo checkin: %s", err)
-				}
-				time.Sleep(24 * time.Second) // duration of clip put this in config?
-				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
-				if err != nil {
-					log.Printf("could not toggle audio: %s", err)
-				}
-				err := obsC.TogglePromo("PooCrewCheckin")
-				if err != nil {
-					log.Printf("could not run poo checkin: %s", err)
-				}
-			},
 			"Panda Pals Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
 				log.Printf("got Panda checkin")
 				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
@@ -732,26 +725,6 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					log.Printf("could not run nosleep checkin: %s", err)
 				}
 			},
-			"RAD Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
-				log.Printf("got RAD checkin")
-				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
-				if err != nil {
-					log.Printf("could not toggle audio: %s", err)
-				}
-				err = obsC.TogglePromo("RADCheckin") // TODO: put this in the config?
-				if err != nil {
-					log.Printf("could not run rad checkin: %s", err)
-				}
-				time.Sleep(16 * time.Second) // duration of clip put this in config?
-				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
-				if err != nil {
-					log.Printf("could not toggle audio: %s", err)
-				}
-				err := obsC.TogglePromo("RADCheckin")
-				if err != nil {
-					log.Printf("could not run rad checkin: %s", err)
-				}
-			},
 		}
 		tw.StartPubSubEventHandler(ctx, wg, redemptionHandlers)
 		log.Printf("starting chat handler")
@@ -772,6 +745,9 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					log.Printf("%s", err)
 					return
 				}
+			}
+			if !config.IsLive.Load() && !msg.IsOwner() {
+				continue
 			}
 			switch msg.Type() {
 			case chat.PrivateMessage:
@@ -1008,7 +984,7 @@ func main() {
 			func(users []string) (map[string]discord.StreamInfo, error) {
 				m := make(map[string]discord.StreamInfo)
 				log.Printf("getting live status for %#v", users)
-				twitchChans, code, err := tw.GetAllStreamInfoForUsers(users)
+				twitchChans, code, err := tw.GetAllStreamInfoForUsers(users...)
 				if err != nil {
 					if code == http.StatusUnauthorized {
 						log.Printf("could not get live channels for twitch: %s attempting to reconnect", err)
@@ -1019,7 +995,7 @@ func main() {
 					} else {
 						for i := 0; i < 10; i++ {
 							log.Printf("could not get live channels for twitch: %s not attempting to reconnect", err)
-							twitchChans, code, err = tw.GetAllStreamInfoForUsers(users)
+							twitchChans, code, err = tw.GetAllStreamInfoForUsers(users...)
 							if err == nil {
 								break
 							} else if code == http.StatusUnauthorized {
@@ -1086,6 +1062,39 @@ func main() {
 	}()
 
 	log.Printf("starting main chat loop")
+	wg.Add(1)
+	go func(tw *chat.Twitch) {
+		defer wg.Done()
+		liveT := time.NewTimer(5 * time.Second)
+		defer liveT.Stop()
+		for {
+			select {
+			case <-liveT.C:
+				userInfo, code, err := tw.GetAllStreamInfoForUsers(channelName)
+				if err != nil {
+					log.Printf("could not get live status for ourselves %d: %s", code, err)
+					liveT.Reset(60 * time.Second)
+					continue
+				}
+				if u, ok := userInfo[channelName]; ok {
+					switch {
+					case config.IsLive.Load() && u.Type == "live":
+						liveT.Reset(5 * 60 * time.Second)
+					case config.IsLive.Load() && u.Type != "live":
+						config.IsLive.Store(false)
+						liveT.Reset(30 * time.Second)
+					case !config.IsLive.Load() && u.Type == "live":
+						config.IsLive.Store(true)
+						liveT.Reset(10 * 60 * time.Second)
+					case !config.IsLive.Load() && u.Type != "live":
+						liveT.Reset(30 * time.Second)
+					}
+				}
+			case <-appContext.Done():
+				return
+			}
+		}
+	}(tw)
 	mainloop(appContext, wg, tw, discordBot, obsC, autoChatter, persist)
 	wg.Wait()
 }

@@ -626,7 +626,7 @@ func (t *Twitch) authorizeRequest(req *http.Request) {
 // GetAllStreamInfoForUsers will give the stream info for the given channel names
 // curl -X GET 'https://api.twitch.tv/helix/streams'
 // https://dev.twitch.tv/docs/api/reference/#get-streams
-func (t *Twitch) GetAllStreamInfoForUsers(usernames []string) (map[string]TwitchStreamInfo, int, error) {
+func (t *Twitch) GetAllStreamInfoForUsers(usernames ...string) (map[string]TwitchStreamInfo, int, error) {
 	m := make(map[string]TwitchStreamInfo)
 	if len(usernames) < 1 {
 		return m, http.StatusInternalServerError, nil
@@ -1082,7 +1082,9 @@ func (t *Twitch) StartPubSubEventHandler(ctx context.Context, wg *sync.WaitGroup
 				}
 				continue
 			}
-
+			if !config.IsLive.Load() {
+				continue
+			}
 			switch msg.Type {
 			case "MESSAGE":
 				mmsg := TwitchEventMessage{}

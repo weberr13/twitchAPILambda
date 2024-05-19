@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -35,6 +36,8 @@ var (
 	}
 	// ErrNeedAuthorization is returned because we need to restart after auth is created
 	ErrNeedAuthorization = fmt.Errorf("user needs to authorize the app")
+	// IsLive must be set to determine if the stream is active
+	IsLive atomic.Bool
 )
 
 // LevelAsNumber maps user levels to a number with owner == 0
@@ -147,19 +150,31 @@ func (cc *CommandConfig) CommandAliases() []string {
 
 // TimerConfig configures a timer
 type TimerConfig struct {
-	WaitTime string        `json:"waittime"`
-	Message  string        `json:"message"`
-	Alias    string        `json:"alias"`
-	ToggleC  chan struct{} `json:"-"`
-	disabled bool          `json:"-"`
+	WaitTime        string        `json:"waittime"`
+	OfflineWaitTime string        `json:"offlineWaitTime"`
+	Message         string        `json:"message"`
+	Alias           string        `json:"alias"`
+	ToggleC         chan struct{} `json:"-"`
+	disabled        bool          `json:"-"`
 	sync.RWMutex
 }
 
 // WaitFor returns a parsed wait time or the minumum time of 5seconds
 func (t *TimerConfig) WaitFor() time.Duration {
-	d, err := time.ParseDuration(t.WaitTime)
+	if IsLive.Load() || t.OfflineWaitTime == "" {
+		d, err := time.ParseDuration(t.WaitTime)
+		if err != nil || d < 5*time.Second {
+			return 5 * time.Second
+		}
+		return d
+	}
+	d, err := time.ParseDuration(t.OfflineWaitTime)
 	if err != nil || d < 5*time.Second {
-		return 5 * time.Second
+		d, err := time.ParseDuration(t.WaitTime)
+		if err != nil || d < 5*time.Second {
+			return 5 * time.Second
+		}
+		return d
 	}
 	return d
 }
