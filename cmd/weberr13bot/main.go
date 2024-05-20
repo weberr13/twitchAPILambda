@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"math/big"
+	mrand "math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -178,6 +179,9 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 		clipModeEnabled := false
 		var lastScene string
 		clipC := make(chan struct{}, 2)
+		r := mrand.New(mrand.NewSource(time.Now().Unix()))
+		betCooldown := map[string]time.Time{}
+
 		commands := map[string]func(msg chat.TwitchMessage){
 			"toggle": func(msg chat.TwitchMessage) {
 				if msg.IsMod() {
@@ -358,6 +362,120 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					tw.Farewell(channelName, msg.GetBotCommandArgs())
 				} else {
 					log.Printf("got bye command from %s", msg.GoString())
+				}
+			},
+			"gamble": func(msg chat.TwitchMessage) {
+				user := msg.AtUser()
+				user = strings.TrimPrefix(user, "@")
+				user = strings.ToLower(user)
+				wt := db.Points{
+					User: user,
+				}
+				var err error
+				if msg.IsOwner() {
+					wt.Points = 6942042371337
+				} else {
+					c, ok := betCooldown[user]
+					if ok && time.Since(c) < 60*time.Second {
+						return
+					}
+					err = persist.Get(wt.Key(), &wt)
+				}
+				betCooldown[user] = time.Now()
+				if err == nil {
+					if wt.Points == 0 {
+						_ = tw.SendMessage(channelName, fmt.Sprintf("%s has no points to gamble, stay active in chat for more points", wt.User))
+					}
+					args := msg.GetBotCommandArgs()
+					if args == "" {
+						_ = tw.SendMessage(channelName, "usage !gamble [points,%%,all]")
+						return
+					}
+					var err error
+					wager := uint64(0)
+					switch {
+					case args == "all":
+						wager = wt.Points
+					case strings.HasSuffix(args, "%"):
+						p := strings.TrimSuffix(args, "%")
+						i, err := strconv.ParseFloat(p, 64)
+						if err != nil {
+							_ = tw.SendMessage(channelName, "usage !gamble [points,%%,all]")
+							return
+						}
+						if i < 0 {
+							_ = tw.SendMessage(channelName, "usage !gamble [points,%%,all]")
+							return
+						}
+						if i > 100 {
+							i = 100.0
+						}
+						wager = uint64(float64(wt.Points) * i / 100.0)
+					default:
+						wager, err = strconv.ParseUint(args, 10, 64)
+						if err != nil {
+							_ = tw.SendMessage(channelName, "usage !gamble [points,%%,all]")
+							return
+						}
+						if wager > wt.Points {
+							wager = wt.Points
+						}
+					}
+					draw := r.Int() % 100
+					log.Printf("draw was %d", draw)
+					if draw >= 49 {
+						if draw >= 95 {
+							wt.Points = wt.Points + 2*wager
+							_ = tw.SendMessage(channelName, fmt.Sprintf("%s rolled %d Critical Success! and won %d and now has %d points", wt.User, draw, 2*wager, wt.Points))
+
+						} else {
+							wt.Points = wt.Points + wager
+							_ = tw.SendMessage(channelName, fmt.Sprintf("%s rolled %d and won %d and now has %d points", wt.User, draw, wager, wt.Points))
+						}
+					} else {
+						wt.Points = wt.Points - wager
+						if draw < 5 {
+							_ = tw.SendMessage(channelName, fmt.Sprintf("%s rolled %d Critial Failure!! no gambling for 10 minutes! and lost %d and now has %d points", wt.User, draw, wager, wt.Points))
+							betCooldown[user] = betCooldown[user].Add(9 * 60 * time.Second)
+						} else {
+							_ = tw.SendMessage(channelName, fmt.Sprintf("%s rolled %d and lost %d and now has %d points", wt.User, draw, wager, wt.Points))
+						}
+					}
+					err = persist.Put(wt.Key(), wt)
+					if err != nil {
+						log.Printf("error putting points %v: %s", wt, err)
+					}
+
+				} else {
+					log.Printf("got %s checking points %v", err, wt)
+					_ = tw.SendMessage(channelName, fmt.Sprintf("%s has points unknown", wt.User))
+					return
+				}
+			},
+			"points": func(msg chat.TwitchMessage) {
+				user := msg.CleanUserFromArgs()
+				wt := db.Points{
+					User: user,
+				}
+				err := persist.Get(wt.Key(), &wt)
+				if err == nil {
+					_ = tw.SendMessage(channelName, fmt.Sprintf("%s has %d points", wt.User, wt.Points))
+				} else {
+					log.Printf("got %s checking points %v", err, wt)
+					_ = tw.SendMessage(channelName, fmt.Sprintf("%s has points unknown", wt.User))
+				}
+			},
+			"watchtime": func(msg chat.TwitchMessage) {
+				user := msg.CleanUserFromArgs()
+				wt := db.Watchtime{
+					User: user,
+				}
+				err := persist.Get(wt.Key(), &wt)
+				if err == nil {
+					_ = tw.SendMessage(channelName, fmt.Sprintf("%s has a watchtime of %s", wt.User, wt.Time.String()))
+				} else {
+					log.Printf("got %s checking watchtime %v", err, wt)
+					_ = tw.SendMessage(channelName, fmt.Sprintf("%s has a watchtime of unknown", wt.User))
 				}
 			},
 			"brb": func(msg chat.TwitchMessage) {
@@ -554,15 +672,6 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					log.Printf("got so command from %s", msg.GoString())
 				}
 			},
-			"contentkrew": func(msg chat.TwitchMessage) {
-				if msg.IsMod() || msg.IsSub() || msg.IsVIP() {
-					// TODO: put this in config?
-					err = tw.SendMessage(channelName, "subscribe to the content krew https://youtube.com/@Content_Krew https://www.tiktok.com/@content_krew")
-					if err != nil {
-						log.Printf("could not send message %s: %s", msg.DisplayName(), err)
-					}
-				}
-			},
 			// todo alias? "rm":
 			"raidmsg": func(msg chat.TwitchMessage) {
 				if msg.IsMod() || msg.IsSub() || msg.IsVIP() {
@@ -728,6 +837,8 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 		}
 		tw.StartPubSubEventHandler(ctx, wg, redemptionHandlers)
 		log.Printf("starting chat handler")
+		lastChecked := time.Now()
+		pointCooldown := map[string]time.Time{}
 	readloop:
 		for {
 			if ctx.Err() != nil {
@@ -782,6 +893,7 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					log.Printf("command: %s, args: %s", msg.GetBotCommand(), msg.GetBotCommandArgs())
 				default:
 					if !config.IsLive.Load() && !msg.IsOwner() {
+						log.Printf("ignoring non-owner messages while offline")
 						continue
 					}
 					user := strings.TrimPrefix(msg.User(), ":")
@@ -795,6 +907,25 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 							shoutouts[user] = so
 						}
 					}
+					if !chat.IsBot(user) {
+						c, ok := pointCooldown[user]
+						if !ok || time.Since(c) > (5*60*time.Second) {
+							points := db.Points{
+								User: user,
+							}
+							_ = persist.Get(points.Key(), &points)
+							if msg.IsSub() {
+								points.Points += 50
+							}
+							points.Points += 50
+							err = persist.Put(points.Key(), points)
+							if err != nil {
+								log.Printf("failed to safe points for %#v: %s", points, err)
+							}
+						}
+						pointCooldown[user] = time.Now()
+					}
+
 					log.Printf(`%s says: "%s"`, msg.DisplayName(), msg.Body())
 				}
 			case chat.PingMessage:
@@ -803,6 +934,28 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					log.Printf("could not keep connection alive: %s", err)
 					return
 				}
+				if config.IsLive.Load() {
+					for user := range knownusers {
+						if chat.IsBot(user) {
+							continue
+						}
+						wt := db.Watchtime{
+							User: user,
+						}
+						err := persist.Get(wt.Key(), &wt)
+						if err == db.ErrNotFound {
+							wt.Time = time.Since(lastChecked)
+						} else if err == nil {
+							wt.Time += time.Since(lastChecked)
+						}
+						err = persist.Put(wt.Key(), wt)
+						if err != nil {
+							log.Printf("could not save %#v", wt)
+						}
+						log.Printf("updating watchtime for %s: %v", user, wt.Time)
+					}
+				}
+				lastChecked = time.Now()
 			case chat.JoinMessage:
 				for k, v := range msg.Users() {
 					if _, ok := knownusers[k]; !ok {

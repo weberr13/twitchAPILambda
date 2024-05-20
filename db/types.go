@@ -2,7 +2,9 @@ package db
 
 import (
 	"errors"
+	"fmt"
 	"io"
+	"time"
 )
 
 // ErrNotFound in the db
@@ -16,4 +18,26 @@ type Persister interface {
 	PrefixScan(prefix string) ([]string, error)
 	Sync() error
 	io.Closer
+}
+
+// Watchtime for holding watchtime info
+type Watchtime struct {
+	User string
+	Time time.Duration
+}
+
+// Key for storing in a KV
+func (w Watchtime) Key() string {
+	return fmt.Sprintf("watchtime-%s", w.User)
+}
+
+// Points for holding user points
+type Points struct {
+	User   string
+	Points uint64
+}
+
+// Key for storing in a KV
+func (w Points) Key() string {
+	return fmt.Sprintf("points-%s", w.User)
 }

@@ -386,3 +386,19 @@ func (c TwitchMessage) GetBotCommandArgs() string {
 	}
 	return ""
 }
+
+// CleanUserFromArgs or just the user who sent it
+func (c TwitchMessage) CleanUserFromArgs() string {
+	user := c.GetBotCommandArgs()
+	if user == "" {
+		user = c.AtUser()
+	} else {
+		userSplit := strings.Fields(user)
+		if len(userSplit) > 0 {
+			user = userSplit[0]
+		}
+	}
+	user = strings.TrimPrefix(user, "@")
+	user = strings.ToLower(user)
+	return user
+}

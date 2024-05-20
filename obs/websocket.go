@@ -134,6 +134,9 @@ func (c *Client) SetPromoYoutube(promoSourceName string, videoHash string) error
 			strings.HasPrefix(videoHash, "https://youtube.com") ||
 			strings.HasPrefix(videoHash, "https://www.youtube.com") {
 			log.Printf("parsing youtube url")
+			if strings.Contains(videoHash, "/shorts") {
+				videoHash = strings.ReplaceAll(videoHash, "/shorts", "")
+			}
 			u, err := url.Parse(videoHash)
 			if err == nil {
 				qp := u.Query()
