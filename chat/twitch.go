@@ -66,19 +66,29 @@ func AlternateUsers() map[string]string {
 }
 
 // Bots we know about
-func Bots() []string {
-	return []string{
-		"gamers__lounge", "00rianaa",
-		"nightbot", "kattah", "streamfahrer", "einfachuwe42", "aliceydra", "drapsnatt", "kofistreambot",
-		"commanderroot", "zkeey", "lurxx", "fwost", "implium", "vlmercy", "rogueg1rl",
-		"pokemoncommunitygame", "0ax2", "arctlco" /*maybe*/, "anotherttvviewer", "morgane2k7", "01aaliyah",
-		"01ella", "own3d", "elbierro", "8hvdes", "7bvllet", "01olivia", "spofoh", "ahahahahhhhahahahahah", "d0nk7",
+func Bots() map[string]struct{} {
+	return map[string]struct{}{
+		"gamers__lounge": {}, "00rianaa": {}, "streamelements": {}, "wopicatch": {}, "8roe": {},
+		"nightbot": {}, "kattah": {}, "streamfahrer": {}, "einfachuwe42": {}, "aliceydra": {},
+		"drapsnatt": {}, "kofistreambot": {},
+		"commanderroot": {}, "zkeey": {}, "lurxx": {}, "fwost": {}, "implium": {}, "vlmercy": {}, "rogueg1rl": {},
+		"pokemoncommunitygame": {}, "0ax2": {}, "arctlco": {} /*maybe*/, "anotherttvviewer": {},
+		"morgane2k7": {}, "01aaliyah": {},
+		"01ella": {}, "own3d": {}, "elbierro": {}, "8hvdes": {}, "7bvllet": {}, "01olivia": {}, "spofoh": {},
+		"ahahahahhhhahahahahah": {}, "d0nk7": {}, "00_ava": {}, "framerates": {}, "0_lonely_egirl": {},
+		"asmr_miyu": {}, "markzynk": {}, "psh_aa": {}, "rockn__": {}, "00_darla": {},
 	}
+}
+
+// IsBot is it probably a bot?
+func IsBot(user string) bool {
+	_, ok := Bots()[user]
+	return ok
 }
 
 // TrimBots from a user list
 func TrimBots(users map[string]interface{}) {
-	for _, bot := range Bots() {
+	for bot := range Bots() {
 		delete(users, bot)
 	}
 }
