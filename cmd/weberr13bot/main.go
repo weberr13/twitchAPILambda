@@ -1245,6 +1245,9 @@ func main() {
 					case !config.IsLive.Load() && u.Type != "live":
 						liveT.Reset(30 * time.Second)
 					}
+				} else {
+					config.IsLive.Store(false)
+					liveT.Reset(30 * time.Second)
 				}
 			case <-appContext.Done():
 				return
