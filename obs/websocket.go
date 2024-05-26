@@ -92,6 +92,29 @@ func (c *Client) GetInputs() ([]*typedefs.Input, error) {
 	return nil, err
 }
 
+// ToggleSourceVisible will hide or show a source given
+func (c *Client) ToggleSourceVisible(sourceName string) error {
+	currentScene, sources, err := c.GetSourcesForCurrentScene()
+	if err != nil {
+		return err
+	}
+	for _, source := range sources {
+		if source.SourceName == sourceName {
+			newState := !source.SceneItemEnabled
+			_, err = c.c.SceneItems.SetSceneItemEnabled(&sceneitems.SetSceneItemEnabledParams{
+				SceneItemEnabled: &newState,
+				SceneItemId:      float64(source.SceneItemID),
+				SceneName:        currentScene,
+			})
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("could not find %s", sourceName)
+}
+
 // SetPromoTwitch sets a twitch clip as the next promo vid
 func (c *Client) SetPromoTwitch(promoSourceName string, videoURL string) error {
 	// https://clips.twitch.tv/embed?clip=ConsiderateTastyTofuUnSane-5fB2PMSUz8PLjrJS

@@ -87,9 +87,9 @@ func IsBot(user string) bool {
 }
 
 // TrimBots from a user list
-func TrimBots(users map[string]interface{}) {
+func TrimBots(users *sync.Map) {
 	for bot := range Bots() {
-		delete(users, bot)
+		users.Delete(bot)
 	}
 }
 

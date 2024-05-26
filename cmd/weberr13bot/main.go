@@ -174,8 +174,8 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 		wtw := pcg.NewWonderTradeWatcher(persist, tw)
 		wtw.Run(channelName)
 		defer wtw.Close()
-		knownusers := map[string]interface{}{}
-		shoutouts := map[string]interface{}{}
+		knownusers := sync.Map{}
+		shoutouts := sync.Map{}
 		clipModeEnabled := false
 		var lastScene string
 		clipC := make(chan struct{}, 2)
@@ -452,6 +452,16 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					return
 				}
 			},
+			"hide": func(msg chat.TwitchMessage) {
+				if msg.IsMod() || msg.IsOwner() {
+					err := obsC.ToggleSourceVisible("Display Capture Blur")
+					if err != nil {
+						// blur not found, probably the wrong scene
+						return
+					}
+					_ = obsC.ToggleSourceVisible("Display Capture Desktop")
+				}
+			},
 			"points": func(msg chat.TwitchMessage) {
 				user := msg.CleanUserFromArgs()
 				wt := db.Points{
@@ -527,11 +537,12 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					if len(userSplit) > 0 {
 						user = userSplit[0]
 					}
-					if so, ok := shoutouts[user].(ShoutOutUser); ok {
-						so.LastShoutout = time.Now()
-						shoutouts[user] = so
+					if so, ok := shoutouts.Load(user); ok {
+						sso, _ := so.(ShoutOutUser)
+						sso.LastShoutout = time.Now()
+						shoutouts.Store(user, sso)
 					} else {
-						shoutouts[user] = ShoutOutUser{LastShoutout: time.Now()}
+						shoutouts.Store(user, ShoutOutUser{LastShoutout: time.Now()})
 					}
 					clips := tw.SuperShoutOut(channelName, user, true)
 					if len(clips) > 0 {
@@ -661,11 +672,12 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					if len(userSplit) > 0 {
 						user = userSplit[0]
 					}
-					if so, ok := shoutouts[user].(ShoutOutUser); ok {
-						so.LastShoutout = time.Now()
-						shoutouts[user] = so
+					if so, ok := shoutouts.Load(user); ok {
+						sso, _ := so.(ShoutOutUser)
+						sso.LastShoutout = time.Now()
+						shoutouts.Store(user, sso)
 					} else {
-						shoutouts[user] = ShoutOutUser{LastShoutout: time.Now()}
+						shoutouts.Store(user, ShoutOutUser{LastShoutout: time.Now()})
 					}
 					tw.Shoutout(channelName, user, true)
 				} else {
@@ -694,9 +706,10 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 			"whois": func(msg chat.TwitchMessage) {
 				if msg.IsMod() {
 					users := []string{}
-					for k := range knownusers {
-						users = append(users, k)
-					}
+					knownusers.Range(func(k any, _ any) bool {
+						users = append(users, k.(string))
+						return true
+					})
 					err = tw.SendMessage(channelName, fmt.Sprintf("Current users are: %v", users))
 					if err != nil {
 						log.Printf("could not send whgois %s: %s", msg.DisplayName(), err)
@@ -773,7 +786,54 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 			wg.Add(1)
 			go RunTimer(ctx, wg, timer, commands, func(s string) { _ = tw.SendMessage(channelName, s) }, ourConfig.Twitch.Timers[name].ToggleC)
 		}
+
+		getPointRedemption := func(pointValue uint64) func(ctx context.Context, m chat.TwitchPointRedemption) {
+			return func(ctx context.Context, m chat.TwitchPointRedemption) {
+				points := db.Points{
+					User: m.Redemption.User.DisplayName,
+				}
+				err := persist.Get(points.Key(), &points)
+				if err == nil || err == db.ErrNotFound {
+					points.Points += pointValue
+				} else {
+					log.Printf("Get points redemption failed %#v: %v", points, err)
+					return
+				}
+				err = persist.Put(points.Key(), points)
+				if err != nil {
+					log.Printf("Get points redemption failed %#v: %v", points, err)
+					return
+				}
+				knownusers.Range(func(k any, _ any) bool {
+					user, ok := k.(string)
+					if !ok {
+						return false
+					}
+					points := db.Points{
+						User: user,
+					}
+					err := persist.Get(points.Key(), &points)
+					if err == nil || err == db.ErrNotFound {
+						points.Points += pointValue
+					} else {
+						log.Printf("Get points redemption failed %#v: %v", points, err)
+						return false
+					}
+					err = persist.Put(points.Key(), points)
+					if err != nil {
+						log.Printf("Get points redemption failed %#v: %v", points, err)
+						return false
+					}
+					return true
+				})
+			}
+		}
+
 		redemptionHandlers := map[string]func(context.Context, chat.TwitchPointRedemption){
+			"Get 1000 points":    getPointRedemption(1000),
+			"Get 10000 points":   getPointRedemption(10000),
+			"Get 100000 points":  getPointRedemption(100000),
+			"Get 1000000 points": getPointRedemption(1000000),
 			"Melly's Garden Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
 				log.Printf("got Melly checkin")
 				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
@@ -898,13 +958,14 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					}
 					user := strings.TrimPrefix(msg.User(), ":")
 					// log.Printf("checking for autoshoutout for %s in %#v", user, shoutouts)
-					if so, ok := shoutouts[user].(ShoutOutUser); ok {
+					if so, ok := shoutouts.Load(user); ok {
+						sso, _ := so.(ShoutOutUser)
 						// log.Printf("last shoutout was %v", so.LastShoutout)
-						if time.Since(so.LastShoutout) > 120*time.Minute {
+						if time.Since(sso.LastShoutout) > 120*time.Minute {
 							log.Printf("running shoutout for %s", user)
 							tw.Shoutout(channelName, user, false)
-							so.LastShoutout = time.Now()
-							shoutouts[user] = so
+							sso.LastShoutout = time.Now()
+							shoutouts.Store(user, sso)
 						}
 					}
 					if !chat.IsBot(user) {
@@ -935,9 +996,13 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					return
 				}
 				if config.IsLive.Load() {
-					for user := range knownusers {
+					knownusers.Range(func(k any, _ any) bool {
+						user, ok := k.(string)
+						if !ok {
+							return false
+						}
 						if chat.IsBot(user) {
-							continue
+							return true
 						}
 						wt := db.Watchtime{
 							User: user,
@@ -953,44 +1018,57 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 							log.Printf("could not save %#v", wt)
 						}
 						log.Printf("updating watchtime for %s: %v", user, wt.Time)
-					}
+						return true
+					})
 				}
 				lastChecked = time.Now()
 			case chat.JoinMessage:
 				for k, v := range msg.Users() {
-					if _, ok := knownusers[k]; !ok {
-						// log.Printf("checking %#v for %s", shoutouts, k)
-						if _, ok := shoutouts[k]; !ok {
-							shoutouts[k] = ShoutOutUser{RealName: v}
+					if _, ok := knownusers.Load(k); !ok {
+						if _, ok := shoutouts.Load(k); !ok {
+							shoutouts.Store(k, ShoutOutUser{RealName: v})
 						}
-						// } else {
-						// 	log.Printf("existing user: %s:%s", k, v)
 					}
-					knownusers[k] = v
+					knownusers.Store(k, v)
 				}
-				chat.TrimBots(knownusers)
-				chat.TrimBots(shoutouts)
+				chat.TrimBots(&knownusers)
+				chat.TrimBots(&shoutouts)
 				users := []string{}
-				for k := range knownusers {
-					users = append(users, k)
-				}
+				knownusers.Range(func(key any, _ any) bool {
+					user, ok := key.(string)
+					if !ok {
+						return false
+					}
+					users = append(users, user)
+					return true
+				})
 				log.Printf("current users: %v", users)
 				// log.Printf("current shoutouts: %#v", shoutouts)
 			case chat.PartMessage:
-				farewells := map[string]interface{}{} // time?
+				farewells := sync.Map{} // time?
 				for k, v := range msg.Users() {
-					farewells[k] = v
-					delete(knownusers, k)
+					farewells.Store(k, v)
+					knownusers.Delete(k)
 				}
-				chat.TrimBots(farewells)
-				for k := range farewells {
-					log.Printf("user %s has left", k)
-					tw.Farewell(channelName, k)
-				}
+				chat.TrimBots(&farewells)
+				farewells.Range(func(k any, _ any) bool {
+					user, ok := k.(string)
+					if !ok {
+						return false
+					}
+					log.Printf("user %s has left", user)
+					tw.Farewell(channelName, user)
+					return true
+				})
 				users := []string{}
-				for k := range knownusers {
-					users = append(users, k)
-				}
+				knownusers.Range(func(k any, _ any) bool {
+					user, ok := k.(string)
+					if !ok {
+						return false
+					}
+					users = append(users, user)
+					return true
+				})
 				log.Printf("current users: %v", users)
 			}
 		}
