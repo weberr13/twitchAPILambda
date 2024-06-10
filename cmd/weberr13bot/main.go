@@ -854,6 +854,26 @@ func mainloop(ctx context.Context, wg *sync.WaitGroup, tw *chat.Twitch,
 					log.Printf("could not run melly checkin: %s", err)
 				}
 			},
+			"SSCC Check in": func(ctx context.Context, _ chat.TwitchPointRedemption) {
+				log.Printf("got SSCC checkin")
+				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+				if err != nil {
+					log.Printf("could not toggle audio: %s", err)
+				}
+				err = obsC.TogglePromo("SSCC") // TODO: put this in the config?
+				if err != nil {
+					log.Printf("could not run sscc checkin: %s", err)
+				}
+				time.Sleep(108 * time.Second) // duration of clip put this in config?
+				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
+				if err != nil {
+					log.Printf("could not toggle audio: %s", err)
+				}
+				err := obsC.TogglePromo("SSCC")
+				if err != nil {
+					log.Printf("could not run sscc checkin: %s", err)
+				}
+			},
 			"Panda Pals Checkin": func(ctx context.Context, _ chat.TwitchPointRedemption) {
 				log.Printf("got Panda checkin")
 				err = obsC.ToggleSourceAudio(ourConfig.LocalOBS.MusicSource)
