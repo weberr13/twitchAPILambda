@@ -298,6 +298,65 @@ func (c *Client) ToggleInputVolume(name string) error {
 	return fmt.Errorf("could not find input: %s in %#v", name, ins)
 }
 
+/*
+
+
+2024/06/09 19:13:12 got source &typedefs.SceneItem{
+	InputKind:"", IsGroup:false,
+	SceneItemBlendMode:"OBS_BLEND_NORMAL",
+	SceneItemEnabled:true, SceneItemID:94,
+	 SceneItemIndex:40, SceneItemLocked:false,
+	 SceneItemTransform:typedefs.SceneItemTransform{Alignment:5,
+		BoundsAlignment:0, BoundsHeight:0, BoundsType:"OBS_BOUNDS_NONE",
+		BoundsWidth:0, CropBottom:0, CropLeft:0, CropRight:0, CropTop:0,
+		Height:2160, PositionX:0, PositionY:0, Rotation:0, ScaleX:1,
+		ScaleY:1, SourceHeight:2160, SourceWidth:3840, Width:3840},
+		SourceName:"Alert Scene", SourceType:"OBS_SOURCE_TYPE_SCENE"}
+
+*/
+
+// SourceTypeScene is an embedded scene as a source
+var SourceTypeScene = "OBS_SOURCE_TYPE_SCENE"
+
+// GetSourcesForScene returns a list of the scene items for the named
+func (c *Client) GetSourcesForScene(sceneName string) ([]*typedefs.SceneItem, error) {
+	resp2, err := c.c.SceneItems.GetSceneItemList(&sceneitems.GetSceneItemListParams{SceneName: sceneName})
+	if err != nil {
+		return nil, err
+	}
+	return resp2.SceneItems, nil
+}
+
+// TogglePromoForScene toggles the promo named within the given scene name
+func (c *Client) TogglePromoForScene(sceneName, promoSourceName string) error {
+	sources, err := c.GetSourcesForScene(sceneName)
+	if err != nil {
+		return err
+	}
+	newState := false
+	for _, source := range sources {
+		if source.SourceType == SourceTypeScene {
+			err = c.TogglePromoForScene(source.SourceName, promoSourceName)
+			if err == nil {
+				return nil // we found it in an embedded scene
+			}
+		}
+		if source.SourceName == promoSourceName {
+			newState = !source.SceneItemEnabled
+			_, err = c.c.SceneItems.SetSceneItemEnabled(&sceneitems.SetSceneItemEnabledParams{
+				SceneItemEnabled: &newState,
+				SceneItemId:      float64(source.SceneItemID),
+				SceneName:        sceneName,
+			})
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("could not find Promo scene: %s", promoSourceName)
+}
+
 // TogglePromo enables the promo scene if found
 func (c *Client) TogglePromo(promoSourceName string) error {
 	currentScene, sources, err := c.GetSourcesForCurrentScene()
@@ -306,6 +365,12 @@ func (c *Client) TogglePromo(promoSourceName string) error {
 	}
 	newState := false
 	for _, source := range sources {
+		if source.SourceType == SourceTypeScene {
+			err = c.TogglePromoForScene(source.SourceName, promoSourceName)
+			if err == nil {
+				return nil // we found it in an embedded scene
+			}
+		}
 		if source.SourceName == promoSourceName {
 			newState = !source.SceneItemEnabled
 			_, err = c.c.SceneItems.SetSceneItemEnabled(&sceneitems.SetSceneItemEnabledParams{
